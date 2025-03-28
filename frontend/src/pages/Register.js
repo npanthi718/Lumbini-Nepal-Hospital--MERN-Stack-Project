@@ -8,13 +8,9 @@ import {
   Button,
   Grid,
   Alert,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
 } from '@mui/material';
 import { Link, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import apiService from '../services/api';
 
 const Register = () => {
   const navigate = useNavigate();
@@ -25,37 +21,89 @@ const Register = () => {
     confirmPassword: '',
     phone: '',
     address: '',
-    role: 'patient', // default role
+    role: 'patient', // Fixed role for patient registration
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const validateForm = () => {
+    if (!formData.name.trim()) {
+      setError('Name is required');
+      return false;
+    }
+    if (!formData.email.trim()) {
+      setError('Email is required');
+      return false;
+    }
+    if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      setError('Please enter a valid email address');
+      return false;
+    }
+    if (!formData.password) {
+      setError('Password is required');
+      return false;
+    }
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      return false;
+    }
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match');
+      return false;
+    }
+    if (!formData.phone.trim()) {
+      setError('Phone number is required');
+      return false;
+    }
+    if (!formData.address.trim()) {
+      setError('Address is required');
+      return false;
+    }
+    return true;
+  };
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value,
+    }));
+    // Clear error when user starts typing
+    setError('');
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setSuccess('');
+    setLoading(true);
 
-    // Validate passwords match
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
+    if (!validateForm()) {
+      setLoading(false);
       return;
     }
 
     try {
-      const response = await axios.post('http://localhost:5000/api/auth/register', formData);
-      setSuccess('Registration successful! Please login.');
-      setTimeout(() => {
-        navigate('/login');
-      }, 2000);
+      // Remove confirmPassword before sending to API
+      const { confirmPassword, ...registrationData } = formData;
+      
+      const response = await apiService.register(registrationData);
+      
+      if (response.data) {
+        setSuccess('Registration successful! Please login.');
+        setTimeout(() => {
+          navigate('/login');
+        }, 2000);
+      }
     } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed');
+      console.error('Registration error:', err);
+      setError(
+        err.response?.data?.message || 
+        'Registration failed. Please try again.'
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -71,13 +119,13 @@ const Register = () => {
       >
         <Paper elevation={3} sx={{ p: 4, width: '100%' }}>
           <Typography component="h1" variant="h5" align="center" gutterBottom>
-            Register
+            Patient Registration
           </Typography>
 
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
 
-          <Box component="form" onSubmit={handleSubmit} sx={{ mt: 1 }}>
+          <Box component="form" onSubmit={handleSubmit} noValidate sx={{ mt: 1 }}>
             <Grid container spacing={2}>
               <Grid item xs={12}>
                 <TextField
@@ -87,6 +135,8 @@ const Register = () => {
                   label="Full Name"
                   value={formData.name}
                   onChange={handleChange}
+                  autoFocus
+                  error={!!error && !formData.name}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -98,6 +148,7 @@ const Register = () => {
                   type="email"
                   value={formData.email}
                   onChange={handleChange}
+                  error={!!error && !formData.email}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -109,6 +160,8 @@ const Register = () => {
                   type="password"
                   value={formData.password}
                   onChange={handleChange}
+                  error={!!error && !formData.password}
+                  helperText="Password must be at least 6 characters long"
                 />
               </Grid>
               <Grid item xs={12}>
@@ -120,6 +173,7 @@ const Register = () => {
                   type="password"
                   value={formData.confirmPassword}
                   onChange={handleChange}
+                  error={!!error && formData.password !== formData.confirmPassword}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -130,6 +184,7 @@ const Register = () => {
                   label="Phone Number"
                   value={formData.phone}
                   onChange={handleChange}
+                  error={!!error && !formData.phone}
                 />
               </Grid>
               <Grid item xs={12}>
@@ -140,21 +195,10 @@ const Register = () => {
                   label="Address"
                   value={formData.address}
                   onChange={handleChange}
+                  multiline
+                  rows={2}
+                  error={!!error && !formData.address}
                 />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControl fullWidth>
-                  <InputLabel>Role</InputLabel>
-                  <Select
-                    name="role"
-                    value={formData.role}
-                    label="Role"
-                    onChange={handleChange}
-                  >
-                    <MenuItem value="patient">Patient</MenuItem>
-                    <MenuItem value="doctor">Doctor</MenuItem>
-                  </Select>
-                </FormControl>
               </Grid>
             </Grid>
 
@@ -163,13 +207,14 @@ const Register = () => {
               fullWidth
               variant="contained"
               sx={{ mt: 3, mb: 2 }}
+              disabled={loading}
             >
-              Register
+              {loading ? 'Registering...' : 'Register'}
             </Button>
 
             <Grid container justifyContent="flex-end">
               <Grid item>
-                <Link to="/login" style={{ textDecoration: 'none' }}>
+                <Link to="/login" style={{ textDecoration: 'none', color: 'primary.main' }}>
                   Already have an account? Sign in
                 </Link>
               </Grid>

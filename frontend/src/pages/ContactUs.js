@@ -19,7 +19,7 @@ import {
   Instagram,
   LinkedIn,
 } from '@mui/icons-material';
-import api from '../services/api';
+import apiService from '../services/api';
 
 const ContactUs = () => {
   const [formData, setFormData] = useState({
@@ -46,7 +46,7 @@ const ContactUs = () => {
       setError(null);
       
       console.log('Sending contact form data:', formData); // Debug log
-      const response = await api.post('/contact', formData);
+      const response = await apiService.sendMessage(formData);
       console.log('Contact form response:', response.data); // Debug log
       
       setSuccess('Message sent successfully! We will get back to you soon.');

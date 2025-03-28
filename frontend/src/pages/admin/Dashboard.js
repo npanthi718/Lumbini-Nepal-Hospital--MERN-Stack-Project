@@ -58,7 +58,7 @@ import {
   Delete,
 } from "@mui/icons-material";
 import { useAuth } from "../../context/AuthContext";
-import api from "../../services/api";
+import apiService from "../../services/api";
 import { format, isToday, isFuture } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { useSnackbar } from "notistack";
@@ -144,31 +144,28 @@ const AdminDashboard = () => {
       setLoading(true);
       setError(null);
 
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
+      // First get the appointments to calculate stats
+      const appointmentsRes = await apiService.getAppointments();
+      const appointments = appointmentsRes.data;
 
-      // Set token in api instance
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
-      // Make API calls in parallel
-      const [appointmentsRes, doctorsRes, patientsRes, departmentsRes, messagesRes] = await Promise.all([
-        api.get('/admin/appointments'),
-        api.get('/admin/doctors'),
-        api.get('/admin/patients'),
-        api.get('/admin/departments'),
-        api.get('/contact')
+      // Get other data
+      const [doctorsRes, patientsRes, departmentsRes, messagesRes] = await Promise.all([
+        apiService.getDoctors(),
+        apiService.getPatients(),
+        apiService.getDepartments(),
+        apiService.getMessages()
       ]);
 
-      // Update state with fetched data
+      // Update appointments state
       setAppointments({
-        today: appointmentsRes.data.filter(app => app.date && isToday(new Date(app.date))),
-        upcoming: appointmentsRes.data.filter(app => app.date && isFuture(new Date(app.date))),
-        completed: appointmentsRes.data.filter(app => app.status === 'completed'),
-        cancelled: appointmentsRes.data.filter(app => app.status === 'cancelled'),
-        all: appointmentsRes.data
+        today: appointments.filter(app => app.date && isToday(new Date(app.date))),
+        upcoming: appointments.filter(app => app.date && isFuture(new Date(app.date))),
+        completed: appointments.filter(app => app.status === 'completed'),
+        cancelled: appointments.filter(app => app.status === 'cancelled'),
+        all: appointments
       });
+
+      // Update other states
       setDoctors(doctorsRes.data);
       setPatients(patientsRes.data);
       setDepartments(departmentsRes.data);
@@ -179,58 +176,48 @@ const AdminDashboard = () => {
       setStats({
         totalDoctors: doctorsRes.data.length,
         totalPatients: patientsRes.data.length,
-        totalAppointments: appointmentsRes.data.length,
-        completedAppointments: appointmentsRes.data.filter(apt => apt.status === 'completed').length,
-        pendingAppointments: appointmentsRes.data.filter(apt => apt.status === 'pending').length,
-        cancelledAppointments: appointmentsRes.data.filter(apt => apt.status === 'cancelled').length,
-        unreadMessages: unreadCount
-      });
-
-      // Update appointment stats
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-
-      const todayAppointments = appointmentsRes.data.filter(apt => {
-        const aptDate = new Date(apt.date);
-        return aptDate >= today && aptDate < tomorrow;
-      });
-
-      const upcomingAppointments = appointmentsRes.data.filter(apt => {
-        const aptDate = new Date(apt.date);
-        return aptDate >= tomorrow;
-      });
-
-      setAppointmentStats({
-        today: todayAppointments.length,
-        upcoming: upcomingAppointments.length,
-        completed: appointmentsRes.data.filter(apt => apt.status === 'completed').length,
-        cancelled: appointmentsRes.data.filter(apt => apt.status === 'cancelled').length
+        totalAppointments: appointments.length,
+        completedAppointments: appointments.filter(apt => apt.status === 'completed').length,
+        pendingAppointments: appointments.filter(apt => apt.status === 'pending').length,
+        cancelledAppointments: appointments.filter(apt => apt.status === 'cancelled').length,
+        unreadMessages: calculateUnreadCount(messagesRes.data)
       });
 
     } catch (error) {
       console.error('Dashboard data fetch error:', error);
-      setError(error.message || 'Failed to fetch dashboard data');
+      setError('Failed to fetch dashboard data. Please try again.');
       
-      if (error.response?.status === 401 || error.response?.status === 403) {
-        localStorage.removeItem('token');
-        navigate('/login');
-      }
+      // Clear states on error
+      setAppointments({ today: [], upcoming: [], completed: [], cancelled: [], all: [] });
+      setDoctors([]);
+      setPatients([]);
+      setDepartments([]);
+      setMessages([]);
+      setUnreadCount(0);
+      setStats({
+        totalDoctors: 0,
+        totalPatients: 0,
+        totalAppointments: 0,
+        completedAppointments: 0,
+        pendingAppointments: 0,
+        cancelledAppointments: 0,
+        unreadMessages: 0
+      });
     } finally {
       setLoading(false);
     }
-  }, [navigate]);
+  }, []);
 
   const fetchMessages = async () => {
     try {
-      const response = await api.get('/contact');
-      const fetchedMessages = response.data;
-      setMessages(fetchedMessages);
-      setUnreadCount(calculateUnreadCount(fetchedMessages));
+      const response = await apiService.getMessages();
+      if (response && response.data) {
+        setMessages(response.data);
+        setUnreadCount(calculateUnreadCount(response.data));
+      }
     } catch (error) {
       console.error('Error fetching messages:', error);
-      setError('Failed to fetch messages');
+      // Don't update state on error to keep existing messages
     }
   };
 
@@ -238,10 +225,10 @@ const AdminDashboard = () => {
     try {
       setError(null);
       if (action === 'delete') {
-        await api.delete(`/contact/${messageId}`);
+        await apiService.deleteMessage(messageId);
       } else {
         // Update message status
-        await api.patch(`/contact/${messageId}`, { status: action });
+        await apiService.updateMessageStatus(messageId, action === 'read' ? 'read' : action);
       }
       
       // Fetch updated messages immediately after action
@@ -250,7 +237,7 @@ const AdminDashboard = () => {
       setSuccess(`Message ${action === 'delete' ? 'deleted' : 'marked as read'} successfully`);
     } catch (error) {
       console.error('Error updating message:', error);
-      setError('Failed to update message');
+      setError(error.response?.data?.message || 'Failed to update message');
     }
   };
 
@@ -286,7 +273,7 @@ const AdminDashboard = () => {
 
   const handleStatusChange = async (appointmentId, newStatus) => {
     try {
-      await api.put(`/admin/appointments/${appointmentId}/status`, {
+      await apiService.updateAppointmentStatus(appointmentId, {
         status: newStatus,
       });
       setSuccess("Appointment status updated successfully");
@@ -299,7 +286,7 @@ const AdminDashboard = () => {
 
   const handleDoctorStatusChange = async (doctorId, newStatus) => {
     try {
-      await api.patch(`/admin/doctors/${doctorId}/status`, {
+      await apiService.updateDoctorStatus(doctorId, {
         isApproved: newStatus === "active",
       });
       setSuccess(`Doctor status updated to ${newStatus}`);
@@ -315,7 +302,7 @@ const AdminDashboard = () => {
       // Update all doctors to active status
       await Promise.all(
         doctors.map((doctor) =>
-          api.patch(`/admin/doctors/${doctor._id}/approval`, {
+          apiService.updateDoctorApproval(doctor._id, {
             isApproved: true,
           })
         )
@@ -370,8 +357,8 @@ const AdminDashboard = () => {
       if (isDoctor) {
         // For doctor history, fetch both appointments and prescriptions
         const [appointmentsRes, prescriptionsRes] = await Promise.all([
-          api.get(`/admin/doctors/${id}/appointments`),
-          api.get(`/admin/doctors/${id}/prescriptions`)
+          apiService.getDoctorAppointments(id),
+          apiService.getDoctorPrescriptions(id)
         ]);
 
         const doctorAppointments = appointmentsRes.data || [];
@@ -433,8 +420,8 @@ const AdminDashboard = () => {
         // For patient history
         try {
           const [appointmentsRes, prescriptionsRes] = await Promise.all([
-            api.get(`/admin/patients/${id}/appointments`),
-            api.get(`/admin/patients/${id}/prescriptions`)
+            apiService.getPatientAppointments(id),
+            apiService.getPatientPrescriptions(id)
           ]);
 
           const appointments = appointmentsRes.data || [];
@@ -516,7 +503,7 @@ const AdminDashboard = () => {
       setLoading(true);
       setError(null);
 
-      await api.patch(`/admin/appointments/${appointmentId}/status`, {
+      await apiService.updateAppointmentStatus(appointmentId, {
         status: action,
         cancellationReason: reason
       });
@@ -572,7 +559,7 @@ const AdminDashboard = () => {
 
     try {
       setLoading(true);
-      await api.patch(`/admin/appointments/${selectedAppointment._id}/status`, {
+      await apiService.updateAppointmentStatus(selectedAppointment._id, {
         status: 'cancelled',
         cancellationReason: cancellationReason.trim()
       });
@@ -658,19 +645,21 @@ const AdminDashboard = () => {
 
   const handleMessageStatusUpdate = async (messageId, status) => {
     try {
-      await api.patch(`/contact/${messageId}`, { status });
+      await apiService.updateMessageStatus(messageId, { 
+        status: status === 'read' ? 'read' : status 
+      });
       // Refresh messages after update
       await fetchMessages();
       setSuccess(`Message marked as ${status} successfully`);
     } catch (error) {
       console.error('Error updating message status:', error);
-      setError('Failed to update message status');
+      setError(error.response?.data?.message || 'Failed to update message status');
     }
   };
 
   const handleDeleteMessage = async (messageId) => {
     try {
-      await api.delete(`/contact/${messageId}`);
+      await apiService.deleteMessage(messageId);
       setSuccess("Message deleted successfully");
       fetchDashboardData();
     } catch (err) {
@@ -1690,68 +1679,67 @@ const renderHistoryDialog = () => (
           )}
 
           {/* Prescriptions History */}
-          {!patientHistory.isDoctor && (
-            <>
-              <Typography variant="h6" gutterBottom sx={{ mt: 4 }}>
-                Prescriptions History
+          <Typography variant="h6" gutterBottom sx={{ mt: 4 }}>
+            {patientHistory.isDoctor ? 'Patient Prescriptions' : 'Prescriptions History'}
+          </Typography>
+          {Object.keys(patientHistory.prescriptionsByDoctor).length > 0 ? (
+            Object.entries(patientHistory.prescriptionsByDoctor).map(([key, data]) => (
+              <Box key={key} sx={{ mb: 4 }}>
+                <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold', color: 'primary.main' }}>
+                  {patientHistory.isDoctor ? 
+                    `Patient: ${data.doctorInfo.name}` :
+                    `Doctor: ${data.doctorInfo.name} (${data.doctorInfo.department})`
+                  }
+                </Typography>
+                <TableContainer component={Paper}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Date</TableCell>
+                        <TableCell>Diagnosis</TableCell>
+                        <TableCell>Medicines</TableCell>
+                        <TableCell>Tests</TableCell>
+                        <TableCell>Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {data.prescriptions.map((prescription) => (
+                        <TableRow key={prescription._id}>
+                          <TableCell>{format(new Date(prescription.createdAt), "MMM dd, yyyy")}</TableCell>
+                          <TableCell>{prescription.diagnosis}</TableCell>
+                          <TableCell>
+                            {prescription.medicines.map((med, idx) => (
+                              <Typography key={idx} variant="body2">
+                                {med.name} - {med.dosage}
+                              </Typography>
+                            ))}
+                          </TableCell>
+                          <TableCell>
+                            {prescription.tests?.join(', ') || '-'}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleViewPrescription(prescription)}
+                            >
+                              View Details
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            ))
+          ) : (
+            <Paper sx={{ p: 2, backgroundColor: 'grey.50' }}>
+              <Typography align="center" color="textSecondary">
+                No prescriptions found
               </Typography>
-              {Object.keys(patientHistory.prescriptionsByDoctor).length > 0 ? (
-                Object.entries(patientHistory.prescriptionsByDoctor).map(([key, data]) => (
-                  <Box key={key} sx={{ mb: 4 }}>
-                    <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold', color: 'primary.main' }}>
-                      Doctor: {data.doctorInfo.name} ({data.doctorInfo.department})
-                    </Typography>
-                    <TableContainer component={Paper}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Date</TableCell>
-                            <TableCell>Diagnosis</TableCell>
-                            <TableCell>Medicines</TableCell>
-                            <TableCell>Tests</TableCell>
-                            <TableCell>Actions</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {data.prescriptions.map((prescription) => (
-                            <TableRow key={prescription._id}>
-                              <TableCell>{format(new Date(prescription.createdAt), "MMM dd, yyyy")}</TableCell>
-                              <TableCell>{prescription.diagnosis}</TableCell>
-                              <TableCell>
-                                {prescription.medicines.map((med, idx) => (
-                                  <Typography key={idx} variant="body2">
-                                    {med.name} - {med.dosage}
-                                  </Typography>
-                                ))}
-                              </TableCell>
-                              <TableCell>
-                                {prescription.tests?.join(', ') || '-'}
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  variant="outlined"
-                                  size="small"
-                                  onClick={() => handleViewPrescription(prescription)}
-                                >
-                                  View Details
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </Box>
-                ))
-              ) : (
-                <Paper sx={{ p: 2, backgroundColor: 'grey.50' }}>
-                  <Typography align="center" color="textSecondary">
-                    No prescriptions found
-                  </Typography>
-                </Paper>
-              )}
-            </>
-          )}
+            </Paper>
+          )},
         </Box>
       ) : (
         <Paper sx={{ p: 2, backgroundColor: 'grey.50' }}>

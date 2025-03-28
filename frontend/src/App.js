@@ -6,6 +6,8 @@ import { createBrowserRouter } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import { ErrorBoundary } from 'react-error-boundary';
+import { Box, Typography, Button } from '@mui/material';
 
 // Import pages
 import Home from './pages/Home';
@@ -22,6 +24,34 @@ import PatientDashboard from './pages/patient/Dashboard';
 import NotFound from './pages/NotFound';
 import AboutUs from './pages/AboutUs';
 import ContactUs from './pages/ContactUs';
+
+// Error Fallback Component
+const ErrorFallback = ({ error, resetErrorBoundary }) => (
+  <Box
+    sx={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: '100vh',
+      p: 3,
+    }}
+  >
+    <Typography variant="h4" gutterBottom>
+      Something went wrong
+    </Typography>
+    <Typography color="error" gutterBottom>
+      {error.message}
+    </Typography>
+    <Button
+      variant="contained"
+      onClick={resetErrorBoundary}
+      sx={{ mt: 2 }}
+    >
+      Try again
+    </Button>
+  </Box>
+);
 
 // Create theme
 const theme = createTheme({
@@ -186,12 +216,14 @@ const router = createBrowserRouter([
 
 function App() {
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <AuthProvider>
-        <RouterProvider router={router} />
-      </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary FallbackComponent={ErrorFallback}>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 

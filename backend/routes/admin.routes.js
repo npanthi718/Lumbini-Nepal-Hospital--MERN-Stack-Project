@@ -241,25 +241,7 @@ router.get('/doctors/:id/appointments', async (req, res) => {
       .sort({ date: -1 })
       .lean();
 
-    // Transform the data to ensure consistent structure
-    const transformedAppointments = appointments.map(appointment => ({
-      ...appointment,
-      doctorId: {
-        ...appointment.doctorId,
-        name: appointment.doctorId?.userId?.name || 'Unknown Doctor',
-        email: appointment.doctorId?.userId?.email || 'No email',
-        department: {
-          name: appointment.doctorId?.department?.name || 'Unknown Department'
-        }
-      },
-      patientId: {
-        name: appointment.patientId?.name || 'Unknown Patient',
-        email: appointment.patientId?.email || 'No email',
-        phone: appointment.patientId?.phone || 'No phone'
-      }
-    }));
-
-    res.json(transformedAppointments);
+    res.json(appointments);
   } catch (error) {
     console.error('Error fetching doctor appointments:', error);
     res.status(500).json({ message: 'Error fetching doctor appointments', error: error.message });
@@ -269,33 +251,24 @@ router.get('/doctors/:id/appointments', async (req, res) => {
 // Get doctor prescriptions
 router.get('/doctors/:id/prescriptions', async (req, res) => {
   try {
+    console.log('Fetching doctor prescriptions...');
     const prescriptions = await Prescription.find({ doctorId: req.params.id })
       .populate({
         path: 'doctorId',
         populate: [
-          {
-            path: 'userId',
-            select: 'name email'
-          },
-          {
-            path: 'department',
-            select: 'name'
-          }
+          { path: 'userId', select: 'name email' },
+          { path: 'department', select: 'name' }
         ]
       })
-      .populate({
-        path: 'patientId',
-        populate: {
-          path: 'userId',
-          select: 'name email'
-        }
-      })
-      .sort({ createdAt: -1 });
-
+      .populate('patientId', 'name email')
+      .sort({ createdAt: -1 })
+      .lean();
+    
+    console.log(`Found ${prescriptions.length} prescriptions for doctor ${req.params.id}`);
     res.json(prescriptions);
   } catch (error) {
     console.error('Error fetching doctor prescriptions:', error);
-    res.status(500).json({ message: 'Error fetching doctor prescriptions' });
+    res.status(500).json({ message: 'Error fetching doctor prescriptions', error: error.message });
   }
 });
 

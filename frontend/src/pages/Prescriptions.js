@@ -34,7 +34,7 @@ import {
   Description as DescriptionIcon,
   Warning as WarningIcon,
 } from '@mui/icons-material';
-import api from '../services/api';
+import apiService from '../services/api';
 import { format } from 'date-fns';
 
 const PrescriptionDialog = ({ open, onClose, prescription }) => {
@@ -173,7 +173,7 @@ const Prescriptions = () => {
   const fetchPrescriptions = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/patient/prescriptions');
+      const response = await apiService.getPrescriptions();
       setPrescriptions(response.data);
     } catch (error) {
       console.error('Error fetching prescriptions:', error);
