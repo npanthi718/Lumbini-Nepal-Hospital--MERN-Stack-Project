@@ -27,6 +27,7 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Avatar,
 } from "@mui/material";
 import { Search as SearchIcon, Close as CloseIcon } from "@mui/icons-material";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -36,6 +37,7 @@ import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { TimePicker } from "@mui/x-date-pickers/TimePicker";
 import { useAuth } from "../context/AuthContext";
+import { format, parse } from "date-fns";
 
 // Create an axios instance with base URL and default headers
 const api = axios.create({
@@ -103,12 +105,19 @@ const Appointments = () => {
   const [formData, setFormData] = useState({
     doctorId: "",
     date: null,
-    time: null,
+    time: "",
     type: "General Checkup",
     symptoms: "",
     notes: "",
   });
   const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const [viewDialog, setViewDialog] = useState(false);
+  const [rebookingDetails, setRebookingDetails] = useState(null);
+  const [timeSlots, setTimeSlots] = useState([]);
+  const [timeSlotMessage, setTimeSlotMessage] = useState('');
+
+  // Get rebooking info from location state
+  const { rebookData, isRebooking: isRebookingFromState, previousAppointment } = location.state || {};
 
   useEffect(() => {
     const doctorId = location.state?.doctorId;
@@ -138,6 +147,37 @@ const Appointments = () => {
     }
   }, [error]);
 
+  useEffect(() => {
+    if (isRebookingFromState && rebookData) {
+      setFormData((prev) => ({
+        ...prev,
+        doctorId: rebookData.doctorId,
+        date: rebookData.previousAppointmentDate,
+        time: rebookData.previousAppointmentTime,
+        type: rebookData.type,
+        symptoms: rebookData.symptoms,
+        notes: rebookData.notes,
+      }));
+      setOpenDialog(true);
+    }
+  }, [isRebookingFromState, rebookData]);
+
+  useEffect(() => {
+    const state = location.state;
+    if (state?.isRebooking && state?.rebookData) {
+      setRebookingDetails(state.rebookData);
+      setFormData({
+        doctorId: state.rebookData.doctorId,
+        date: state.rebookData.date,
+        time: state.rebookData.timeSlot,
+        type: state.rebookData.type,
+        symptoms: state.rebookData.symptoms,
+        notes: `Previous appointment details:\nDate: ${state.rebookData.previousDate}\nTime: ${state.rebookData.previousTime}\nCancellation Reason: ${state.rebookData.cancellationReason}\n\nPrevious Notes: ${state.rebookData.notes}`,
+      });
+      setOpenDialog(true);
+    }
+  }, [location.state]);
+
   const fetchDoctorDetails = async (doctorId) => {
     try {
       const response = await api.get(`/doctors/${doctorId}`);
@@ -154,19 +194,24 @@ const Appointments = () => {
 
   const fetchAppointments = async () => {
     try {
-      const response = await api.get("/patient/appointments");
-
-      setAppointments(Array.isArray(response.data) ? response.data : []);
-      setLoading(false);
-    } catch (err) {
-      console.error("Error fetching appointments:", err);
-      setError("Failed to fetch appointments");
+      setLoading(true);
+      const response = await api.get('/patients/appointments', {
+        params: {
+          populate: 'doctorId,doctorId.department,doctorId.specialization,doctorId.email,doctorId.phone'
+        }
+      });
+      setAppointments(response.data);
+    } catch (error) {
+      console.error('Error fetching appointments:', error);
+      setError(error.response?.data?.message || 'Failed to fetch appointments');
+    } finally {
       setLoading(false);
     }
   };
 
   const fetchDoctors = async () => {
     try {
+      setLoading(true);
       const response = await api.get("/doctors", {
         params: {
           populate:
@@ -178,6 +223,8 @@ const Appointments = () => {
     } catch (err) {
       console.error("Failed to fetch doctors:", err);
       setError("Failed to load doctors. Please try again later.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -200,7 +247,7 @@ const Appointments = () => {
     console.log("New time selected:", newTime);
     setFormData((prev) => ({
       ...prev,
-      time: newTime,
+      time: newTime
     }));
   };
 
@@ -214,73 +261,103 @@ const Appointments = () => {
     setActiveStep((prev) => prev - 1);
   };
 
+  // Function to get available time slots for a doctor on a specific date
+  const getAvailableTimeSlots = async (doctorId, date) => {
+    try {
+      const response = await api.get(`/doctors/${doctorId}/available-slots`, {
+        params: {
+          date: format(date, 'yyyy-MM-dd')
+        }
+      });
+      
+      if (response.data.availableSlots.length === 0) {
+        setTimeSlotMessage(response.data.message || 'No available slots for this date');
+        return { availableSlots: [], message: response.data.message };
+      }
+      
+      return {
+        availableSlots: response.data.availableSlots,
+        message: null
+      };
+    } catch (error) {
+      console.error('Error fetching available slots:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to fetch available time slots';
+      setTimeSlotMessage(errorMessage);
+      return { availableSlots: [], message: errorMessage };
+    }
+  };
+
+  // Update time slots when doctor or date changes
+  useEffect(() => {
+    if (formData.doctorId && formData.date) {
+      getAvailableTimeSlots(formData.doctorId, formData.date)
+        .then(response => {
+          setTimeSlots(response.availableSlots);
+          setTimeSlotMessage(response.message);
+          if (response.message && !response.availableSlots.length) {
+            setError(response.message);
+          }
+        })
+        .catch(error => {
+          console.error('Failed to fetch time slots:', error);
+          setError('Failed to fetch available time slots');
+        });
+    }
+  }, [formData.doctorId, formData.date]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log("Submit form data:", formData);
-
-    if (!user) {
-      setShowLoginDialog(true);
-      return;
-    }
-
-    setError("");
-    setSuccess("");
+    setError('');
+    setSuccess('');
 
     try {
-      // Format date and time properly
+      if (!formData.doctorId || !formData.date || !formData.time) {
+        setError('Please fill in all required fields');
+        return;
+      }
+
       const appointmentDate = new Date(formData.date);
-      const appointmentTime = new Date(formData.time);
+      const [hours, minutes] = formData.time.split(':');
+      appointmentDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
 
-      // Create combined date-time
-      const combinedDateTime = new Date(
-        appointmentDate.getFullYear(),
-        appointmentDate.getMonth(),
-        appointmentDate.getDate(),
-        appointmentTime.getHours(),
-        appointmentTime.getMinutes()
-      );
-
-      // Format timeSlot in HH:mm format
-      const hours = String(appointmentTime.getHours()).padStart(2, "0");
-      const minutes = String(appointmentTime.getMinutes()).padStart(2, "0");
-      const timeSlot = `${hours}:${minutes}`;
-
-      // Get selected doctor details
-      const selectedDoctor = doctors.find((d) => d._id === formData.doctorId);
-      if (!selectedDoctor) {
-        setError("Please select a valid doctor");
+      // Check if appointment time is in the past
+      if (appointmentDate < new Date()) {
+        setError('Cannot book appointments in the past');
         return;
       }
 
       const appointmentData = {
         doctorId: formData.doctorId,
-        date: combinedDateTime.toISOString(),
-        timeSlot: timeSlot,
-        type: formData.type || "General Checkup",
-        symptoms: formData.symptoms || "",
-        notes: formData.notes || "",
+        date: format(formData.date, 'yyyy-MM-dd'),
+        time: formData.time,
+        type: formData.type || 'General Checkup',
+        symptoms: formData.symptoms || '',
+        notes: formData.notes || ''
       };
 
-      console.log("Sending appointment data:", appointmentData);
-
-      const response = await api.post("/appointments", appointmentData);
-
-      console.log("Appointment created:", response.data);
-      setSuccess("Appointment booked successfully!");
-      setOpenDialog(false);
-      fetchAppointments(); // Refresh the appointments list
-      setFormData({
-        doctorId: "",
-        date: null,
-        time: null,
-        type: "General Checkup",
-        symptoms: "",
-        notes: "",
-      });
-      setActiveStep(0);
-    } catch (err) {
-      console.error("Error creating appointment:", err);
-      setError(err.response?.data?.message || "Failed to book appointment");
+      const response = await api.post('/appointments', appointmentData);
+      
+      if (response.data) {
+        setSuccess('Appointment booked successfully!');
+        // Reset form data
+        setFormData({
+          doctorId: '',
+          date: null,
+          time: '',
+          type: 'General Checkup',
+          symptoms: '',
+          notes: ''
+        });
+        // Reset to first step
+        setActiveStep(0);
+        // Close the dialog
+        setOpenDialog(false);
+        // Fetch updated appointments
+        await fetchAppointments();
+      }
+    } catch (error) {
+      console.error('Error booking appointment:', error);
+      setError(error.response?.data?.message || 'Failed to book appointment. Please try again.');
     }
   };
 
@@ -447,7 +524,7 @@ const Appointments = () => {
                     label="Appointment Date"
                     value={formData.date}
                     onChange={handleDateChange}
-                    textField={(params) => (
+                    renderInput={(params) => (
                       <TextField {...params} fullWidth required />
                     )}
                     minDate={new Date()}
@@ -455,16 +532,7 @@ const Appointments = () => {
                 </LocalizationProvider>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <LocalizationProvider dateAdapter={AdapterDateFns}>
-                  <TimePicker
-                    label="Appointment Time"
-                    value={formData.time}
-                    onChange={handleTimeChange}
-                    textField={(params) => (
-                      <TextField {...params} fullWidth required />
-                    )}
-                  />
-                </LocalizationProvider>
+                {renderTimeSlots()}
               </Grid>
             </Grid>
           </Box>
@@ -478,13 +546,15 @@ const Appointments = () => {
             </Typography>
             <Grid container spacing={3}>
               <Grid item xs={12}>
-                <FormControl fullWidth>
-                  <InputLabel>Appointment Type</InputLabel>
+                <FormControl fullWidth sx={{ mt: 1 }}>
+                  <InputLabel id="appointment-type-label">Appointment Type</InputLabel>
                   <Select
+                    labelId="appointment-type-label"
                     name="type"
                     value={formData.type}
                     onChange={handleChange}
                     defaultValue="General Checkup"
+                    label="Appointment Type"
                   >
                     <MenuItem value="General Checkup">General Checkup</MenuItem>
                     <MenuItem value="Follow-up">Follow-up</MenuItem>
@@ -557,38 +627,9 @@ const Appointments = () => {
     }
   };
 
-  const renderAppointmentActions = (appointment) => {
-    if (user?.role === "doctor") {
-      return (
-        <Box>
-          {appointment.status === "pending" && (
-            <>
-              <Button
-                color="success"
-                size="small"
-                onClick={() => {
-                  setSelectedAppointment(appointment);
-                  setOpenActionDialog(true);
-                }}
-              >
-                Complete
-              </Button>
-              <Button
-                color="error"
-                size="small"
-                onClick={() => {
-                  setSelectedAppointment(appointment);
-                  setOpenActionDialog(true);
-                }}
-              >
-                Cancel
-              </Button>
-            </>
-          )}
-        </Box>
-      );
-    }
-    return null;
+  const handleViewDetails = (appointment) => {
+    setSelectedAppointment(appointment);
+    setViewDialog(true);
   };
 
   const renderAppointments = () => {
@@ -598,6 +639,7 @@ const Appointments = () => {
           <TableHead>
             <TableRow>
               <TableCell>Doctor Name</TableCell>
+              <TableCell>Department</TableCell>
               <TableCell>Specialization</TableCell>
               <TableCell>Date & Time</TableCell>
               <TableCell>Status</TableCell>
@@ -608,14 +650,20 @@ const Appointments = () => {
             {appointments.map((appointment) => (
               <TableRow key={appointment._id}>
                 <TableCell>
-                  {appointment.doctorId?.userId?.name || "Unknown Doctor"}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Avatar>{appointment.doctorId?.name?.charAt(0) || 'D'}</Avatar>
+                    <Typography>{appointment.doctorId?.name || 'Not Available'}</Typography>
+                  </Box>
                 </TableCell>
+                <TableCell>{appointment.doctorId?.department?.name || 'Not Available'}</TableCell>
+                <TableCell>{appointment.doctorId?.specialization || 'Not Available'}</TableCell>
                 <TableCell>
-                  {appointment.doctorId?.department?.name || "N/A"}
-                </TableCell>
-                <TableCell>
-                  {new Date(appointment.date).toLocaleDateString()}{" "}
-                  {appointment.timeSlot}
+                  <Typography variant="body2">
+                    {format(new Date(appointment.date), 'MMM dd, yyyy')}
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    {appointment.timeSlot}
+                  </Typography>
                 </TableCell>
                 <TableCell>
                   <Chip
@@ -624,7 +672,15 @@ const Appointments = () => {
                     size="small"
                   />
                 </TableCell>
-                <TableCell>{renderAppointmentActions(appointment)}</TableCell>
+                <TableCell>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => handleViewDetails(appointment)}
+                  >
+                    View Details
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -632,6 +688,101 @@ const Appointments = () => {
       </TableContainer>
     );
   };
+
+  const renderTimeSlots = () => {
+    if (!formData.date) {
+      return <Typography color="textSecondary">Please select a date first</Typography>;
+    }
+
+    if (timeSlotMessage) {
+      return <Typography color="error">{timeSlotMessage}</Typography>;
+    }
+
+    if (!timeSlots.length) {
+      return <Typography color="error">No available time slots for this date</Typography>;
+    }
+
+    return (
+      <FormControl fullWidth>
+        <InputLabel>Select Time</InputLabel>
+        <Select
+          value={formData.time}
+          onChange={(e) => handleTimeChange(e.target.value)}
+          label="Select Time"
+        >
+          {timeSlots.map((slot) => (
+            <MenuItem key={slot} value={slot}>
+              {format(parse(slot, 'HH:mm', new Date()), 'hh:mm a')}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+    );
+  };
+
+  const renderBookingDialog = () => (
+    <Dialog
+      open={openDialog}
+      onClose={() => setOpenDialog(false)}
+      maxWidth="md"
+      fullWidth
+      aria-labelledby="booking-dialog-title"
+    >
+      <DialogTitle id="booking-dialog-title">
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="h6">
+            {isRebookingFromState ? 'Rebook Appointment' : 'Book New Appointment'}
+          </Typography>
+          <IconButton onClick={() => setOpenDialog(false)}>
+            <CloseIcon />
+          </IconButton>
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        {isRebookingFromState && rebookingDetails && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            <Typography variant="body2">
+              Previous Appointment: {rebookingDetails.previousDate} at {rebookingDetails.previousTime}<br />
+              Doctor: {rebookingDetails.doctorName}<br />
+              Department: {rebookingDetails.department}<br />
+              Cancellation Reason: {rebookingDetails.cancellationReason}
+            </Typography>
+          </Alert>
+        )}
+        <Box sx={{ mt: 2 }}>
+          <Stepper activeStep={activeStep} sx={{ mb: 3 }}>
+            {steps.map((label) => (
+              <Step key={label}>
+                <StepLabel>{label}</StepLabel>
+              </Step>
+            ))}
+          </Stepper>
+          {renderStepContent(activeStep)}
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
+        {activeStep > 0 && <Button onClick={handleBack}>Back</Button>}
+        {activeStep < steps.length - 1 ? (
+          <Button
+            variant="contained"
+            onClick={handleNext}
+            disabled={!formData.doctorId || (activeStep === 1 && (!formData.date || !formData.time))}
+          >
+            Next
+          </Button>
+        ) : (
+          <Button 
+            variant="contained" 
+            color="primary" 
+            onClick={handleSubmit}
+          >
+            {isRebookingFromState ? 'Confirm Rebooking' : 'Book Appointment'}
+          </Button>
+        )}
+      </DialogActions>
+    </Dialog>
+  );
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -657,72 +808,26 @@ const Appointments = () => {
         )}
       </Box>
 
+      {isRebookingFromState && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          You are rebooking a cancelled appointment. Previous details have been pre-filled.
+        </Alert>
+      )}
+      
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
       {success && (
-        <Alert severity="success" sx={{ mb: 2 }}>
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess(null)}>
           {success}
         </Alert>
       )}
 
       {renderAppointments()}
 
-      <Dialog
-        open={openDialog}
-        onClose={() => setOpenDialog(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>
-          <Box
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <Typography variant="h6">Book Appointment</Typography>
-            <IconButton onClick={() => setOpenDialog(false)}>
-              <CloseIcon />
-            </IconButton>
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 2 }}>
-            <Stepper activeStep={activeStep} sx={{ mb: 3 }}>
-              {steps.map((label) => (
-                <Step key={label}>
-                  <StepLabel>{label}</StepLabel>
-                </Step>
-              ))}
-            </Stepper>
-            {renderStepContent(activeStep)}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
-          {activeStep > 0 && <Button onClick={handleBack}>Back</Button>}
-          {activeStep < steps.length - 1 ? (
-            <Button
-              variant="contained"
-              onClick={handleNext}
-              disabled={
-                !formData.doctorId ||
-                (activeStep === 1 && (!formData.date || !formData.time))
-              }
-            >
-              Next
-            </Button>
-          ) : (
-            <Button variant="contained" color="primary" onClick={handleSubmit}>
-              Book Appointment
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
+      {renderBookingDialog()}
 
       <Dialog open={showLoginDialog} onClose={() => setShowLoginDialog(false)}>
         <DialogTitle>Login Required</DialogTitle>
@@ -784,6 +889,85 @@ const Appointments = () => {
             {selectedAppointment?.status === "pending" ? "Complete" : "Cancel"}{" "}
             Appointment
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={viewDialog}
+        onClose={() => setViewDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Appointment Details</DialogTitle>
+        <DialogContent>
+          {selectedAppointment && (
+            <Box sx={{ pt: 2 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Doctor:</strong> {selectedAppointment.doctorId?.name || 'Not Available'}
+                  </Typography>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Department:</strong> {selectedAppointment.doctorId?.department?.name || 'Not Available'}
+                  </Typography>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Specialization:</strong> {selectedAppointment.doctorId?.specialization || 'Not Available'}
+                  </Typography>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Email:</strong> {selectedAppointment.doctorId?.email || 'Not Available'}
+                  </Typography>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Phone:</strong> {selectedAppointment.doctorId?.phone || 'Not Available'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Date:</strong> {format(new Date(selectedAppointment.date), 'MMM dd, yyyy')}
+                  </Typography>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Time:</strong> {selectedAppointment.timeSlot}
+                  </Typography>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Status:</strong> 
+                    <Chip
+                      label={selectedAppointment.status}
+                      color={getStatusColor(selectedAppointment.status)}
+                      size="small"
+                      sx={{ ml: 1 }}
+                    />
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Type:</strong> {selectedAppointment.type}
+                  </Typography>
+                  {selectedAppointment.symptoms && (
+                    <>
+                      <Typography variant="subtitle1" gutterBottom>
+                        <strong>Symptoms:</strong>
+                      </Typography>
+                      <Typography paragraph sx={{ ml: 2 }}>
+                        {selectedAppointment.symptoms}
+                      </Typography>
+                    </>
+                  )}
+                  {selectedAppointment.notes && (
+                    <>
+                      <Typography variant="subtitle1" gutterBottom>
+                        <strong>Notes:</strong>
+                      </Typography>
+                      <Typography paragraph sx={{ ml: 2 }}>
+                        {selectedAppointment.notes}
+                      </Typography>
+                    </>
+                  )}
+                </Grid>
+              </Grid>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setViewDialog(false)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Container>

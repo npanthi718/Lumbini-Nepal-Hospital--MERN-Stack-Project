@@ -3,7 +3,8 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Prescription = require('../models/prescription.model');
 const Appointment = require('../models/appointment.model');
-const { auth, authorize } = require('../middleware/auth');
+const Doctor = require('../models/doctor.model');
+const { authenticateToken, isAdmin } = require('../middleware/auth');
 
 // Validation middleware
 const validatePrescription = [
@@ -17,8 +18,13 @@ const validatePrescription = [
 ];
 
 // Create prescription (doctor only)
-router.post('/', auth, authorize('doctor'), validatePrescription, async (req, res) => {
+router.post('/', authenticateToken, validatePrescription, async (req, res) => {
     try {
+        // Check if user is a doctor
+        if (req.user.role !== 'doctor') {
+            return res.status(403).json({ message: 'Only doctors can create prescriptions' });
+        }
+
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(400).json({ errors: errors.array() });
@@ -26,10 +32,16 @@ router.post('/', auth, authorize('doctor'), validatePrescription, async (req, re
 
         const { appointmentId, diagnosis, medicines, tests, notes, followUpDate } = req.body;
 
+        // Get the doctor document using the user ID
+        const doctor = await Doctor.findOne({ userId: req.user._id });
+        if (!doctor) {
+            return res.status(404).json({ message: 'Doctor profile not found' });
+        }
+
         // Check if appointment exists and belongs to the doctor
         const appointment = await Appointment.findOne({
             _id: appointmentId,
-            doctorId: req.user._id,
+            doctorId: doctor._id,
             status: 'completed'
         });
 
@@ -41,7 +53,7 @@ router.post('/', auth, authorize('doctor'), validatePrescription, async (req, re
         const prescription = new Prescription({
             appointmentId,
             patientId: appointment.patientId,
-            doctorId: req.user._id,
+            doctorId: doctor._id,
             diagnosis,
             medicines,
             tests,
@@ -50,42 +62,86 @@ router.post('/', auth, authorize('doctor'), validatePrescription, async (req, re
         });
 
         await prescription.save();
+
+        // Populate the prescription with doctor and patient details
+        await prescription.populate([
+            {
+                path: 'doctorId',
+                populate: [
+                    { path: 'userId', select: 'name email' },
+                    { path: 'department', select: 'name' }
+                ]
+            },
+            { path: 'patientId', select: 'name email phone' }
+        ]);
+
         res.status(201).json(prescription);
     } catch (error) {
+        console.error('Error creating prescription:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 
 // Get patient's prescriptions
-router.get('/patient', auth, authorize('patient'), async (req, res) => {
+router.get('/patient', authenticateToken, async (req, res) => {
     try {
+        // Check if user is a patient
+        if (req.user.role !== 'patient') {
+            return res.status(403).json({ message: 'Access denied: Patient only' });
+        }
+
         const prescriptions = await Prescription.find({ patientId: req.user._id })
-            .populate('doctorId', 'specialization department')
+            .populate({
+                path: 'doctorId',
+                populate: [
+                    { path: 'userId', select: 'name email' },
+                    { path: 'department', select: 'name' }
+                ]
+            })
             .sort({ createdAt: -1 });
         res.json(prescriptions);
     } catch (error) {
+        console.error('Error fetching patient prescriptions:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 
 // Get doctor's prescriptions
-router.get('/doctor', auth, authorize('doctor'), async (req, res) => {
+router.get('/doctor', authenticateToken, async (req, res) => {
     try {
-        const prescriptions = await Prescription.find({ doctorId: req.user._id })
+        // Check if user is a doctor
+        if (req.user.role !== 'doctor') {
+            return res.status(403).json({ message: 'Access denied: Doctor only' });
+        }
+
+        // Get the doctor document
+        const doctor = await Doctor.findOne({ userId: req.user._id });
+        if (!doctor) {
+            return res.status(404).json({ message: 'Doctor profile not found' });
+        }
+
+        const prescriptions = await Prescription.find({ doctorId: doctor._id })
             .populate('patientId', 'name email phone')
             .sort({ createdAt: -1 });
         res.json(prescriptions);
     } catch (error) {
+        console.error('Error fetching doctor prescriptions:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 
 // Get prescription by ID
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', authenticateToken, async (req, res) => {
     try {
         const prescription = await Prescription.findById(req.params.id)
             .populate('patientId', 'name email phone')
-            .populate('doctorId', 'specialization department');
+            .populate({
+                path: 'doctorId',
+                populate: [
+                    { path: 'userId', select: 'name email' },
+                    { path: 'department', select: 'name' }
+                ]
+            });
 
         if (!prescription) {
             return res.status(404).json({ message: 'Prescription not found' });
@@ -96,23 +152,39 @@ router.get('/:id', auth, async (req, res) => {
             return res.status(403).json({ message: 'Not authorized to view this prescription' });
         }
 
-        if (req.user.role === 'doctor' && prescription.doctorId.toString() !== req.user._id.toString()) {
-            return res.status(403).json({ message: 'Not authorized to view this prescription' });
+        if (req.user.role === 'doctor') {
+            const doctor = await Doctor.findOne({ userId: req.user._id });
+            if (!doctor || prescription.doctorId.toString() !== doctor._id.toString()) {
+                return res.status(403).json({ message: 'Not authorized to view this prescription' });
+            }
         }
 
         res.json(prescription);
     } catch (error) {
+        console.error('Error fetching prescription:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 
-// Update prescription status
-router.patch('/:id/status', auth, authorize('doctor'), async (req, res) => {
+// Update prescription status (doctor only)
+router.patch('/:id/status', authenticateToken, async (req, res) => {
     try {
+        // Check if user is a doctor
+        if (req.user.role !== 'doctor') {
+            return res.status(403).json({ message: 'Only doctors can update prescription status' });
+        }
+
         const { status } = req.body;
+        
+        // Get the doctor document
+        const doctor = await Doctor.findOne({ userId: req.user._id });
+        if (!doctor) {
+            return res.status(404).json({ message: 'Doctor profile not found' });
+        }
+
         const prescription = await Prescription.findOne({
             _id: req.params.id,
-            doctorId: req.user._id
+            doctorId: doctor._id
         });
 
         if (!prescription) {
@@ -122,14 +194,27 @@ router.patch('/:id/status', auth, authorize('doctor'), async (req, res) => {
         prescription.status = status;
         await prescription.save();
 
+        // Populate the updated prescription
+        await prescription.populate([
+            {
+                path: 'doctorId',
+                populate: [
+                    { path: 'userId', select: 'name email' },
+                    { path: 'department', select: 'name' }
+                ]
+            },
+            { path: 'patientId', select: 'name email phone' }
+        ]);
+
         res.json({ message: 'Prescription status updated successfully', prescription });
     } catch (error) {
+        console.error('Error updating prescription status:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 
 // Get prescription statistics (admin only)
-router.get('/stats/overview', auth, authorize('admin'), async (req, res) => {
+router.get('/stats/overview', authenticateToken, isAdmin, async (req, res) => {
     try {
         const stats = await Promise.all([
             Prescription.countDocuments({ status: 'active' }),
@@ -143,6 +228,28 @@ router.get('/stats/overview', auth, authorize('admin'), async (req, res) => {
             cancelledPrescriptions: stats[2]
         });
     } catch (error) {
+        console.error('Error fetching prescription statistics:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+});
+
+// Get prescriptions by patient ID (admin only)
+router.get('/patient/:patientId', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const prescriptions = await Prescription.find({ patientId: req.params.patientId })
+            .populate({
+                path: 'doctorId',
+                populate: [
+                    { path: 'userId', select: 'name email' },
+                    { path: 'department', select: 'name' }
+                ]
+            })
+            .populate('patientId', 'name email phone')
+            .sort({ createdAt: -1 });
+
+        res.json(prescriptions);
+    } catch (error) {
+        console.error('Error fetching patient prescriptions:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });

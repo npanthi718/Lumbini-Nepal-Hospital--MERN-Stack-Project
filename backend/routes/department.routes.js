@@ -3,7 +3,7 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Department = require('../models/department.model');
 const Doctor = require('../models/doctor.model');
-const { auth, authorize } = require('../middleware/auth');
+const { authenticateToken, isAdmin } = require('../middleware/auth');
 
 // Validation middleware
 const validateDepartment = [
@@ -19,8 +19,8 @@ const validateDepartment = [
 router.get('/', async (req, res) => {
     try {
         console.log('Fetching all departments...');
-        const departments = await Department.find()
-            .select('-__v')
+        const departments = await Department.find({ status: 'active' })
+            .select('name description specializations services facilities workingHours')
             .lean();
 
         console.log(`Found ${departments.length} departments`);
@@ -56,7 +56,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create department (admin only)
-router.post('/', auth, authorize('admin'), validateDepartment, async (req, res) => {
+router.post('/', authenticateToken, isAdmin, validateDepartment, async (req, res) => {
     try {
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
@@ -85,12 +85,13 @@ router.post('/', auth, authorize('admin'), validateDepartment, async (req, res) 
         await department.save();
         res.status(201).json(department);
     } catch (error) {
+        console.error('Error creating department:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 
 // Update department (admin only)
-router.put('/:id', auth, authorize('admin'), validateDepartment, async (req, res) => {
+router.put('/:id', authenticateToken, isAdmin, validateDepartment, async (req, res) => {
     try {
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
@@ -110,12 +111,13 @@ router.put('/:id', auth, authorize('admin'), validateDepartment, async (req, res
         await department.save();
         res.json(department);
     } catch (error) {
+        console.error('Error updating department:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 
 // Add doctor to department (admin only)
-router.post('/:id/doctors', auth, authorize('admin'), async (req, res) => {
+router.post('/:id/doctors', authenticateToken, isAdmin, async (req, res) => {
     try {
         const { doctorId } = req.body;
         const department = await Department.findById(req.params.id);
@@ -138,12 +140,13 @@ router.post('/:id/doctors', auth, authorize('admin'), async (req, res) => {
 
         res.json({ message: 'Doctor added to department successfully', department });
     } catch (error) {
+        console.error('Error adding doctor to department:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 
 // Remove doctor from department (admin only)
-router.delete('/:id/doctors/:doctorId', auth, authorize('admin'), async (req, res) => {
+router.delete('/:id/doctors/:doctorId', authenticateToken, isAdmin, async (req, res) => {
     try {
         const department = await Department.findById(req.params.id);
         if (!department) {
@@ -160,12 +163,13 @@ router.delete('/:id/doctors/:doctorId', auth, authorize('admin'), async (req, re
 
         res.json({ message: 'Doctor removed from department successfully', department });
     } catch (error) {
+        console.error('Error removing doctor from department:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 
 // Update department status (admin only)
-router.patch('/:id/status', auth, authorize('admin'), async (req, res) => {
+router.patch('/:id/status', authenticateToken, isAdmin, async (req, res) => {
     try {
         const { isActive } = req.body;
         const department = await Department.findById(req.params.id);
@@ -179,12 +183,13 @@ router.patch('/:id/status', auth, authorize('admin'), async (req, res) => {
 
         res.json({ message: 'Department status updated successfully', department });
     } catch (error) {
+        console.error('Error updating department status:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 
 // Get department statistics (admin only)
-router.get('/stats/overview', auth, authorize('admin'), async (req, res) => {
+router.get('/stats/overview', authenticateToken, isAdmin, async (req, res) => {
     try {
         const stats = await Promise.all([
             Department.countDocuments({ isActive: true }),
@@ -198,6 +203,7 @@ router.get('/stats/overview', auth, authorize('admin'), async (req, res) => {
             totalDoctors: stats[2]
         });
     } catch (error) {
+        console.error('Error fetching department statistics:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 });

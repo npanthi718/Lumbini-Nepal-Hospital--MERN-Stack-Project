@@ -12,6 +12,10 @@ import {
   Tab,
   Tabs,
   Chip,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
 } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
 
@@ -19,17 +23,19 @@ function Profile() {
   const { user, updateProfile, updatePassword } = useAuth();
   const [activeTab, setActiveTab] = useState(0);
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    role: '',
+    name: user?.name || '',
+    email: user?.email || '',
+    phone: user?.phone || '',
+    age: user?.age || '',
+    gender: user?.gender || '',
+    bloodGroup: user?.bloodGroup || '',
     address: {
-      street: '',
-      city: '',
-      state: '',
-      zipCode: '',
-      country: '',
-    },
+      street: user?.address?.street || '',
+      city: user?.address?.city || '',
+      state: user?.address?.state || '',
+      zipCode: user?.address?.zipCode || '',
+      country: user?.address?.country || ''
+    }
   });
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
@@ -46,7 +52,9 @@ function Profile() {
         name: user.name || '',
         email: user.email || '',
         phone: user.phone || '',
-        role: user.role || '',
+        age: user.age || '',
+        gender: user.gender || '',
+        bloodGroup: user.bloodGroup || '',
         address: user.address || {
           street: '',
           city: '',
@@ -98,10 +106,35 @@ function Profile() {
     setLoading(true);
 
     try {
-      await updateProfile(formData);
+      // Validate required fields
+      if (!formData.name.trim()) {
+        throw new Error('Name is required');
+      }
+      if (!formData.email.trim()) {
+        throw new Error('Email is required');
+      }
+
+      // Create a clean update object
+      const updateData = {
+        name: formData.name.trim(),
+        phone: formData.phone.trim(),
+        age: formData.age,
+        gender: formData.gender,
+        bloodGroup: formData.bloodGroup,
+        address: {
+          street: formData.address.street.trim(),
+          city: formData.address.city.trim(),
+          state: formData.address.state.trim(),
+          zipCode: formData.address.zipCode.trim(),
+          country: formData.address.country.trim()
+        }
+      };
+
+      await updateProfile(updateData);
       setSuccess('Profile updated successfully');
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to update profile');
+      console.error('Profile update error:', err);
+      setError(err.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
@@ -112,8 +145,21 @@ function Profile() {
     setError('');
     setSuccess('');
 
+    // Validate password fields
+    if (!passwordData.currentPassword.trim()) {
+      setError('Current password is required');
+      return;
+    }
+    if (!passwordData.newPassword.trim()) {
+      setError('New password is required');
+      return;
+    }
     if (passwordData.newPassword !== passwordData.confirmPassword) {
       setError('New passwords do not match');
+      return;
+    }
+    if (passwordData.newPassword.length < 6) {
+      setError('New password must be at least 6 characters long');
       return;
     }
 
@@ -127,6 +173,7 @@ function Profile() {
         confirmPassword: '',
       });
     } catch (err) {
+      console.error('Password update error:', err);
       setError(err.response?.data?.message || 'Failed to update password');
     } finally {
       setLoading(false);
@@ -147,99 +194,122 @@ function Profile() {
   };
 
   return (
-    <Container maxWidth="md">
-      <Box sx={{ mt: 4, mb: 4 }}>
-        <Box display="flex" alignItems="center" gap={2} mb={2}>
-          <Typography variant="h4" gutterBottom>
-            Welcome, {formData.name}
-          </Typography>
-          <Chip
-            label={formData.role?.toUpperCase()}
-            color={getRoleColor(formData.role)}
-            size="small"
-          />
-        </Box>
-        <Typography variant="body1" color="text.secondary">
-          Manage your account settings and preferences
-        </Typography>
+    <Container maxWidth="md" sx={{ mt: 4, mb: 4 }}>
+      <Typography variant="h4" gutterBottom>
+        Manage your account settings and preferences
+      </Typography>
+
+      <Box sx={{ mt: 3 }}>
+        <Tabs value={activeTab} onChange={handleTabChange}>
+          <Tab label="PROFILE INFORMATION" />
+          <Tab label="CHANGE PASSWORD" />
+        </Tabs>
       </Box>
 
-      <Paper elevation={3} sx={{ p: 3 }}>
-        <Tabs
-          value={activeTab}
-          onChange={handleTabChange}
-          sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}
-        >
-          <Tab label="Profile Information" />
-          <Tab label="Change Password" />
-        </Tabs>
+      {error && (
+        <Alert severity="error" sx={{ mt: 2 }}>
+          {error}
+        </Alert>
+      )}
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
+      {success && (
+        <Alert severity="success" sx={{ mt: 2 }}>
+          {success}
+        </Alert>
+      )}
 
-        {success && (
-          <Alert severity="success" sx={{ mb: 2 }}>
-            {success}
-          </Alert>
-        )}
-
-        {activeTab === 0 ? (
-          <Box component="form" onSubmit={handleProfileSubmit}>
+      {activeTab === 0 && (
+        <Paper sx={{ p: 3, mt: 3 }}>
+          <form onSubmit={handleProfileSubmit}>
             <Grid container spacing={3}>
               <Grid item xs={12}>
                 <TextField
-                  required
                   fullWidth
-                  name="name"
                   label="Full Name"
+                  name="name"
                   value={formData.name}
                   onChange={handleChange}
+                  required
                 />
               </Grid>
               <Grid item xs={12}>
                 <TextField
-                  required
                   fullWidth
-                  name="email"
                   label="Email Address"
-                  type="email"
+                  name="email"
                   value={formData.email}
                   onChange={handleChange}
-                  disabled
+                  required
+                  type="email"
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  name="phone"
                   label="Phone Number"
+                  name="phone"
                   value={formData.phone}
                   onChange={handleChange}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  name="role"
-                  label="Role"
-                  value={formData.role}
-                  disabled
+                  label="Age"
+                  name="age"
+                  type="number"
+                  value={formData.age}
+                  onChange={handleChange}
+                  inputProps={{ min: 0, max: 150 }}
                 />
               </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Gender</InputLabel>
+                  <Select
+                    name="gender"
+                    value={formData.gender}
+                    onChange={handleChange}
+                    label="Gender"
+                  >
+                    <MenuItem value="">Select Gender</MenuItem>
+                    <MenuItem value="male">Male</MenuItem>
+                    <MenuItem value="female">Female</MenuItem>
+                    <MenuItem value="other">Other</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Blood Group</InputLabel>
+                  <Select
+                    name="bloodGroup"
+                    value={formData.bloodGroup}
+                    onChange={handleChange}
+                    label="Blood Group"
+                  >
+                    <MenuItem value="">Select Blood Group</MenuItem>
+                    <MenuItem value="A+">A+</MenuItem>
+                    <MenuItem value="A-">A-</MenuItem>
+                    <MenuItem value="B+">B+</MenuItem>
+                    <MenuItem value="B-">B-</MenuItem>
+                    <MenuItem value="AB+">AB+</MenuItem>
+                    <MenuItem value="AB-">AB-</MenuItem>
+                    <MenuItem value="O+">O+</MenuItem>
+                    <MenuItem value="O-">O-</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
               <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom>
+                <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
                   Address
                 </Typography>
-                <Divider sx={{ mb: 2 }} />
               </Grid>
               <Grid item xs={12}>
                 <TextField
                   fullWidth
-                  name="address.street"
                   label="Street Address"
+                  name="address.street"
                   value={formData.address.street}
                   onChange={handleChange}
                 />
@@ -247,8 +317,8 @@ function Profile() {
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  name="address.city"
                   label="City"
+                  name="address.city"
                   value={formData.address.city}
                   onChange={handleChange}
                 />
@@ -256,8 +326,8 @@ function Profile() {
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  name="address.state"
                   label="State"
+                  name="address.state"
                   value={formData.address.state}
                   onChange={handleChange}
                 />
@@ -265,8 +335,8 @@ function Profile() {
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  name="address.zipCode"
                   label="ZIP Code"
+                  name="address.zipCode"
                   value={formData.address.zipCode}
                   onChange={handleChange}
                 />
@@ -274,74 +344,76 @@ function Profile() {
               <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  name="address.country"
                   label="Country"
+                  name="address.country"
                   value={formData.address.country}
                   onChange={handleChange}
                 />
               </Grid>
-              <Grid item xs={12}>
-                <Button
-                  type="submit"
-                  variant="contained"
-                  disabled={loading}
-                  sx={{ mt: 2 }}
-                >
-                  {loading ? 'Updating...' : 'Update Profile'}
-                </Button>
-              </Grid>
             </Grid>
-          </Box>
-        ) : (
-          <Box component="form" onSubmit={handlePasswordSubmit}>
-            <Grid container spacing={3}>
-              <Grid item xs={12}>
-                <TextField
-                  required
-                  fullWidth
-                  name="currentPassword"
-                  label="Current Password"
-                  type="password"
-                  value={passwordData.currentPassword}
-                  onChange={handlePasswordChange}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  required
-                  fullWidth
-                  name="newPassword"
-                  label="New Password"
-                  type="password"
-                  value={passwordData.newPassword}
-                  onChange={handlePasswordChange}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  required
-                  fullWidth
-                  name="confirmPassword"
-                  label="Confirm New Password"
-                  type="password"
-                  value={passwordData.confirmPassword}
-                  onChange={handlePasswordChange}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <Button
-                  type="submit"
-                  variant="contained"
-                  disabled={loading}
-                  sx={{ mt: 2 }}
-                >
-                  {loading ? 'Updating...' : 'Update Password'}
-                </Button>
-              </Grid>
+            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+              <Button
+                type="submit"
+                variant="contained"
+                color="primary"
+                disabled={loading}
+              >
+                {loading ? 'Updating...' : 'Update Profile'}
+              </Button>
+            </Box>
+          </form>
+        </Paper>
+      )}
+      
+      {activeTab === 1 && (
+        <Box component="form" onSubmit={handlePasswordSubmit}>
+          <Grid container spacing={3}>
+            <Grid item xs={12}>
+              <TextField
+                required
+                fullWidth
+                name="currentPassword"
+                label="Current Password"
+                type="password"
+                value={passwordData.currentPassword}
+                onChange={handlePasswordChange}
+              />
             </Grid>
-          </Box>
-        )}
-      </Paper>
+            <Grid item xs={12}>
+              <TextField
+                required
+                fullWidth
+                name="newPassword"
+                label="New Password"
+                type="password"
+                value={passwordData.newPassword}
+                onChange={handlePasswordChange}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                required
+                fullWidth
+                name="confirmPassword"
+                label="Confirm New Password"
+                type="password"
+                value={passwordData.confirmPassword}
+                onChange={handlePasswordChange}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <Button
+                type="submit"
+                variant="contained"
+                disabled={loading}
+                sx={{ mt: 2 }}
+              >
+                {loading ? 'Updating...' : 'Update Password'}
+              </Button>
+            </Grid>
+          </Grid>
+        </Box>
+      )}
     </Container>
   );
 }

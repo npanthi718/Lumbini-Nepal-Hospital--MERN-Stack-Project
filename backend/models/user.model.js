@@ -30,6 +30,8 @@ const userSchema = new mongoose.Schema(
     },
     age: {
       type: Number,
+      min: 0,
+      max: 150,
     },
     gender: {
       type: String,
@@ -37,9 +39,14 @@ const userSchema = new mongoose.Schema(
     },
     bloodGroup: {
       type: String,
+      enum: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
     },
     address: {
-      type: String,
+      street: String,
+      city: String,
+      state: String,
+      zipCode: String,
+      country: String,
     },
     createdAt: {
       type: Date,
@@ -53,13 +60,20 @@ const userSchema = new mongoose.Schema(
 
 // Hash password before saving
 userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
-
   try {
+    // Only hash the password if it has been modified or is new
+    if (!this.isModified("password")) {
+      return next();
+    }
+
+    console.log("Hashing password for user:", this.email);
     const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
+    const hashedPassword = await bcrypt.hash(this.password, salt);
+    this.password = hashedPassword;
+    console.log("Password hashed successfully for:", this.email);
     next();
   } catch (error) {
+    console.error("Error hashing password:", error);
     next(error);
   }
 });
@@ -67,12 +81,22 @@ userSchema.pre("save", async function (next) {
 // Method to compare password
 userSchema.methods.comparePassword = async function (candidatePassword) {
   try {
-    if (!this.password || !candidatePassword) {
+    if (!this.password) {
+      console.error("No password hash found for user:", this.email);
       return false;
     }
-    return await bcrypt.compare(candidatePassword, this.password);
+
+    if (!candidatePassword) {
+      console.error("No candidate password provided for user:", this.email);
+      return false;
+    }
+
+    console.log("Comparing password for user:", this.email);
+    const isMatch = await bcrypt.compare(candidatePassword, this.password);
+    console.log("Password comparison result for", this.email, ":", isMatch);
+    return isMatch;
   } catch (error) {
-    console.error("Password comparison error:", error);
+    console.error("Password comparison error for user", this.email, ":", error);
     return false;
   }
 };

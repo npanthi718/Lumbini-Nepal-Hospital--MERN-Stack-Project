@@ -5,12 +5,36 @@ const AuthContext = createContext(null);
 
 // Create an axios instance with base URL
 const api = axios.create({
-  baseURL: "http://localhost:5000",
+  baseURL: "http://localhost:5000/api",
   headers: {
     "Content-Type": "application/json",
   },
-  withCredentials: true,
 });
+
+// Add request interceptor to add token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem("token");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Add response interceptor to handle errors
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem("token");
+    }
+    return Promise.reject(error);
+  }
+);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -26,10 +50,7 @@ export const AuthProvider = ({ children }) => {
         return;
       }
 
-      // Add token to request header
-      api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-
-      const response = await api.get("/api/auth/me");
+      const response = await api.get("/auth/me");
       if (response.data) {
         setUser(response.data);
       } else {
@@ -53,13 +74,23 @@ export const AuthProvider = ({ children }) => {
     try {
       setError(null);
       console.log("Attempting login with:", { email });
-      const response = await api.post("/api/auth/login", { email, password });
+
+      // Clear any existing token
+      localStorage.removeItem("token");
+      
+      const response = await api.post("/auth/login", { email, password });
       console.log("Login response:", response.data);
+
       const { token, user: userData } = response.data;
+      if (!token || !userData) {
+        throw new Error("Invalid response from server");
+      }
 
+      // Store token and update headers
       localStorage.setItem("token", token);
-      api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+      api.defaults.headers.Authorization = `Bearer ${token}`;
 
+      // Set user state
       setUser(userData);
       return userData;
     } catch (error) {
@@ -75,7 +106,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem("token");
-    delete api.defaults.headers.common["Authorization"];
+    delete api.defaults.headers.Authorization;
     setUser(null);
     window.location.href = "/login";
   };
@@ -83,10 +114,36 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     try {
       setError(null);
-      const response = await api.post("/api/auth/register", userData);
+      const response = await api.post("/auth/register", userData);
       return response.data;
     } catch (error) {
       setError(error.response?.data?.message || "Registration failed");
+      throw error;
+    }
+  };
+
+  const updateProfile = async (profileData) => {
+    try {
+      setError(null);
+      const response = await api.put("/users/profile", profileData);
+      setUser(response.data);
+      return response.data;
+    } catch (error) {
+      setError(error.response?.data?.message || "Profile update failed");
+      throw error;
+    }
+  };
+
+  const updatePassword = async (currentPassword, newPassword) => {
+    try {
+      setError(null);
+      const response = await api.put("/auth/password", {
+        currentPassword,
+        newPassword
+      });
+      return response.data;
+    } catch (error) {
+      setError(error.response?.data?.message || "Password update failed");
       throw error;
     }
   };
@@ -99,6 +156,8 @@ export const AuthProvider = ({ children }) => {
     logout,
     register,
     checkAuth,
+    updateProfile,
+    updatePassword
   };
 
   if (loading) {

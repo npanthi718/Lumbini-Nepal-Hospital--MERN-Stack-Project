@@ -24,6 +24,7 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
+  CircularProgress,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -33,14 +34,135 @@ import {
   Description as DescriptionIcon,
   Warning as WarningIcon,
 } from '@mui/icons-material';
-import { useAuth } from '../context/AuthContext';
-import axios from 'axios';
+import api from '../services/api';
+import { format } from 'date-fns';
+
+const PrescriptionDialog = ({ open, onClose, prescription }) => {
+  if (!prescription) return null;
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="md"
+      fullWidth
+      aria-labelledby="prescription-dialog-title"
+    >
+      <DialogTitle id="prescription-dialog-title">
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="h6">Prescription Details</Typography>
+          <IconButton onClick={onClose} size="small">
+            <CloseIcon />
+          </IconButton>
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        <Box sx={{ mt: 2 }}>
+          <Typography variant="h6" color="primary" gutterBottom>
+            Doctor Information
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body1" gutterBottom>
+                <strong>Name:</strong> {prescription.doctorId?.name || prescription.doctorId?.userId?.name || 'Not Available'}
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Typography variant="body1" gutterBottom>
+                <strong>Department:</strong> {prescription.doctorId?.department?.name || 'Not Available'}
+              </Typography>
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="body1" gutterBottom>
+                <strong>Specialization:</strong> {prescription.doctorId?.specialization || 'Not Available'}
+              </Typography>
+            </Grid>
+          </Grid>
+
+          <Divider sx={{ my: 3 }} />
+
+          <Typography variant="h6" color="primary" gutterBottom>
+            Prescription Details
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <Typography variant="body1" gutterBottom>
+                <strong>Date:</strong> {format(new Date(prescription.createdAt), 'MMM dd, yyyy, hh:mm a')}
+              </Typography>
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="body1" gutterBottom>
+                <strong>Diagnosis:</strong>
+              </Typography>
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+                <Typography variant="body1">{prescription.diagnosis}</Typography>
+              </Paper>
+            </Grid>
+          </Grid>
+
+          <Box sx={{ mt: 3 }}>
+            <Typography variant="h6" color="primary" gutterBottom>
+              Medications
+            </Typography>
+            {prescription.medications && prescription.medications.length > 0 ? (
+              prescription.medications.map((med, index) => (
+                <Paper key={index} variant="outlined" sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body1" gutterBottom>
+                        <strong>Medicine:</strong> {med.name}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body1" gutterBottom>
+                        <strong>Dosage:</strong> {med.dosage}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body1" gutterBottom>
+                        <strong>Frequency:</strong> {med.frequency}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body1">
+                        <strong>Duration:</strong> {med.duration}
+                      </Typography>
+                    </Grid>
+                  </Grid>
+                </Paper>
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No medications prescribed
+              </Typography>
+            )}
+          </Box>
+
+          {prescription.notes && (
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="h6" color="primary" gutterBottom>
+                Additional Notes
+              </Typography>
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+                <Typography variant="body1">{prescription.notes}</Typography>
+              </Paper>
+            </Box>
+          )}
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} variant="contained">
+          Close
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
 
 const Prescriptions = () => {
-  const { user } = useAuth();
   const [prescriptions, setPrescriptions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
   const [selectedPrescription, setSelectedPrescription] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
 
@@ -50,11 +172,11 @@ const Prescriptions = () => {
 
   const fetchPrescriptions = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/prescriptions', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+      setLoading(true);
+      const response = await api.get('/patient/prescriptions');
       setPrescriptions(response.data);
-    } catch (err) {
+    } catch (error) {
+      console.error('Error fetching prescriptions:', error);
       setError('Failed to fetch prescriptions');
     } finally {
       setLoading(false);
@@ -84,19 +206,25 @@ const Prescriptions = () => {
     }
   };
 
-  return (
-    <Container maxWidth="lg">
-      <Box sx={{ mt: 4, mb: 4 }}>
-        <Typography variant="h4" gutterBottom>
-          Prescriptions
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          View and manage your prescriptions
-        </Typography>
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
+        <CircularProgress />
       </Box>
+    );
+  }
+
+  return (
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      <Typography variant="h4" gutterBottom>
+        Prescriptions
+      </Typography>
+      <Typography variant="subtitle1" color="text.secondary" gutterBottom>
+        View and manage your prescriptions
+      </Typography>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
@@ -107,8 +235,8 @@ const Prescriptions = () => {
             <TableRow>
               <TableCell>Date</TableCell>
               <TableCell>Doctor</TableCell>
+              <TableCell>Department</TableCell>
               <TableCell>Diagnosis</TableCell>
-              <TableCell>Status</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -116,19 +244,18 @@ const Prescriptions = () => {
             {prescriptions.map((prescription) => (
               <TableRow key={prescription._id}>
                 <TableCell>
-                  {new Date(prescription.createdAt).toLocaleDateString()}
+                  {format(new Date(prescription.createdAt), 'MMM dd, yyyy')}
                 </TableCell>
-                <TableCell>{prescription.doctorId.userId.name}</TableCell>
-                <TableCell>{prescription.diagnosis}</TableCell>
+                <TableCell>{prescription.doctorId?.name || 'Not Available'}</TableCell>
+                <TableCell>{prescription.doctorId?.department?.name || 'Not Available'}</TableCell>
                 <TableCell>
-                  <Chip
-                    label={prescription.status}
-                    color={getStatusColor(prescription.status)}
-                    size="small"
-                  />
+                  <Typography noWrap style={{ maxWidth: 200 }}>
+                    {prescription.diagnosis}
+                  </Typography>
                 </TableCell>
                 <TableCell>
                   <Button
+                    variant="outlined"
                     size="small"
                     onClick={() => handleViewPrescription(prescription)}
                   >
@@ -141,121 +268,11 @@ const Prescriptions = () => {
         </Table>
       </TableContainer>
 
-      <Dialog
+      <PrescriptionDialog
         open={openDialog}
         onClose={handleCloseDialog}
-        maxWidth="md"
-        fullWidth
-      >
-        {selectedPrescription && (
-          <>
-            <DialogTitle>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h6">Prescription Details</Typography>
-                <IconButton onClick={handleCloseDialog}>
-                  <CloseIcon />
-                </IconButton>
-              </Box>
-            </DialogTitle>
-            <DialogContent>
-              <Grid container spacing={3}>
-                <Grid item xs={12}>
-                  <List>
-                    <ListItem>
-                      <ListItemIcon>
-                        <PersonIcon />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Doctor"
-                        secondary={selectedPrescription.doctorId.userId.name}
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemIcon>
-                        <TimeIcon />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Date"
-                        secondary={new Date(selectedPrescription.createdAt).toLocaleString()}
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemIcon>
-                        <DescriptionIcon />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Diagnosis"
-                        secondary={selectedPrescription.diagnosis}
-                      />
-                    </ListItem>
-                  </List>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="h6" gutterBottom>
-                    Medications
-                  </Typography>
-                  <List>
-                    {selectedPrescription.medications.map((medication, index) => (
-                      <ListItem key={index}>
-                        <ListItemIcon>
-                          <PharmacyIcon />
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={medication.name}
-                          secondary={`${medication.dosage} - ${medication.frequency} - ${medication.duration}`}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
-                  {selectedPrescription.instructions && (
-                    <>
-                      <Divider sx={{ my: 2 }} />
-                      <Typography variant="h6" gutterBottom>
-                        Instructions
-                      </Typography>
-                      <Typography variant="body2" paragraph>
-                        {selectedPrescription.instructions}
-                      </Typography>
-                    </>
-                  )}
-                  {selectedPrescription.sideEffects && (
-                    <>
-                      <Divider sx={{ my: 2 }} />
-                      <Typography variant="h6" gutterBottom color="error">
-                        Side Effects
-                      </Typography>
-                      <List>
-                        {selectedPrescription.sideEffects.map((effect, index) => (
-                          <ListItem key={index}>
-                            <ListItemIcon>
-                              <WarningIcon />
-                            </ListItemIcon>
-                            <ListItemText primary={effect} />
-                          </ListItem>
-                        ))}
-                      </List>
-                    </>
-                  )}
-                </Grid>
-              </Grid>
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={handleCloseDialog}>Close</Button>
-              {selectedPrescription.status === 'active' && (
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={() => {
-                    // Handle prescription completion
-                    handleCloseDialog();
-                  }}
-                >
-                  Mark as Completed
-                </Button>
-              )}
-            </DialogActions>
-          </>
-        )}
-      </Dialog>
+        prescription={selectedPrescription}
+      />
     </Container>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Container,
@@ -45,6 +45,7 @@ import {
   Delete as DeleteIcon,
   EventNote,
   Schedule,
+  Refresh,
 } from '@mui/icons-material';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -111,12 +112,20 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [stats, setStats] = useState({
     totalAppointments: 0,
-    pendingAppointments: 0,
-    confirmedAppointments: 0,
+    todayAppointments: 0,
+    upcomingAppointments: 0,
     completedAppointments: 0,
-    cancelledAppointments: 0
+    cancelledAppointments: 0,
+    totalPrescriptions: 0
   });
-  const [appointments, setAppointments] = useState([]);
+  const [appointments, setAppointments] = useState({
+    today: [],
+    upcoming: [],
+    completed: [],
+    cancelled: [],
+    all: []
+  });
+  const [prescriptions, setPrescriptions] = useState([]);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [openPrescriptionDialog, setOpenPrescriptionDialog] = useState(false);
   const [prescriptionNote, setPrescriptionNote] = useState('');
@@ -172,54 +181,99 @@ const Dashboard = () => {
   }, [logout, navigate]);
 
   // Fetch dashboard data
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
+      setLoading(true);
       setError(null);
-      console.log('Fetching dashboard data...');
 
-      // Fix: Use the correct appointments endpoint
+      // First get the doctor's appointments
       const appointmentsRes = await api.get('/doctors/appointments');
-      console.log('Appointments response:', appointmentsRes.data);
-
-      if (!Array.isArray(appointmentsRes.data)) {
-        throw new Error('Invalid appointments data received');
-      }
-
-      // Sort appointments by date in descending order
-      const sortedAppointments = appointmentsRes.data.sort((a, b) => 
-        new Date(b.date) - new Date(a.date)
-      );
-
-      setAppointments(sortedAppointments);
-
-      // Calculate stats from appointments
+      const allAppointments = appointmentsRes.data || [];
+      
+      // Process appointments
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const stats = {
-        totalAppointments: sortedAppointments.length,
-        pendingAppointments: sortedAppointments.filter(a => a.status === 'pending').length,
-        confirmedAppointments: sortedAppointments.filter(a => {
-          const aptDate = new Date(a.date);
-          aptDate.setHours(0, 0, 0, 0);
-          return aptDate.getTime() === today.getTime() && a.status === 'confirmed';
-        }).length,
-        completedAppointments: sortedAppointments.filter(a => a.status === 'completed').length,
-        cancelledAppointments: sortedAppointments.filter(a => a.status === 'cancelled').length
+      const processedAppointments = {
+        today: [],
+        upcoming: [],
+        completed: [],
+        cancelled: [],
+        all: allAppointments
       };
 
-      setStats(stats);
-      setLoading(false);
+      allAppointments.forEach(app => {
+        const appDate = new Date(app.date);
+        appDate.setHours(0, 0, 0, 0);
+
+        if (app.status === 'completed') {
+          processedAppointments.completed.push(app);
+        } else if (app.status === 'cancelled') {
+          processedAppointments.cancelled.push(app);
+        } else if (appDate.getTime() === today.getTime()) {
+          processedAppointments.today.push(app);
+        } else if (appDate.getTime() > today.getTime()) {
+          processedAppointments.upcoming.push(app);
+        }
+      });
+
+      // Update appointments state
+      setAppointments(processedAppointments);
+
+      // Try to get prescriptions
+      try {
+        const prescriptionsRes = await api.get('/prescriptions/doctor');
+        setPrescriptions(prescriptionsRes.data || []);
+      } catch (prescError) {
+        console.error('Error fetching prescriptions:', prescError);
+        setPrescriptions([]);
+      }
+
+      // Update stats
+      setStats({
+        totalAppointments: allAppointments.length,
+        todayAppointments: processedAppointments.today.length,
+        upcomingAppointments: processedAppointments.upcoming.length,
+        completedAppointments: processedAppointments.completed.length,
+        cancelledAppointments: processedAppointments.cancelled.length,
+        totalPrescriptions: 0 // Set to 0 if prescriptions fetch fails
+      });
+
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       setError(error.response?.data?.message || 'Failed to fetch dashboard data');
+      
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        localStorage.removeItem('token');
+        navigate('/login');
+      }
+
+      // Set default states on error
+      setAppointments({
+        today: [],
+        upcoming: [],
+        completed: [],
+        cancelled: [],
+        all: []
+      });
+      setPrescriptions([]);
+      setStats({
+        totalAppointments: 0,
+        todayAppointments: 0,
+        upcomingAppointments: 0,
+        completedAppointments: 0,
+        cancelledAppointments: 0,
+        totalPrescriptions: 0
+      });
+    } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
+
+  // Initial data fetch
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
@@ -311,87 +365,38 @@ const Dashboard = () => {
     }
   };
 
-  const filterAppointments = () => {
+  const categorizeAppointments = (appointments) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Sort appointments by date in descending order (most recent first)
-    const sortedAppointments = [...appointments].sort((a, b) => 
-      new Date(b.date) - new Date(a.date)
-    );
-
-    switch (activeTab) {
-      case 0: // Today's appointments
-        return sortedAppointments.filter(apt => {
-          const aptDate = new Date(apt.date);
-          aptDate.setHours(0, 0, 0, 0);
-          // Only show non-completed, non-cancelled appointments for today
-          return aptDate.getTime() === today.getTime() && 
-                 apt.status !== 'cancelled' && 
-                 apt.status !== 'completed';
-        });
-      case 1: // Upcoming appointments
-        return sortedAppointments.filter(apt => {
-          const aptDate = new Date(apt.date);
-          aptDate.setHours(0, 0, 0, 0);
-          return aptDate > today && 
-                 apt.status !== 'cancelled' && 
-                 apt.status !== 'completed';
-        });
-      case 2: // Past appointments
-        return sortedAppointments.filter(apt => {
-          const aptDate = new Date(apt.date);
-          aptDate.setHours(0, 0, 0, 0);
-          // Show appointments that are either completed, cancelled, or from past dates
-          return aptDate < today || 
-                 apt.status === 'completed' || 
-                 apt.status === 'cancelled';
-        });
-      default:
-        return sortedAppointments;
-    }
-  };
-
-  // Update the tab counts to show correct numbers
-  const getTodayAppointments = () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return appointments.filter(apt => {
-      const aptDate = new Date(apt.date);
-      aptDate.setHours(0, 0, 0, 0);
-      return aptDate.getTime() === today.getTime() && 
-             apt.status !== 'cancelled' && 
-             apt.status !== 'completed';
-    });
-  };
-
-  const getUpcomingAppointments = () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return appointments.filter(apt => {
-      const aptDate = new Date(apt.date);
-      aptDate.setHours(0, 0, 0, 0);
-      return aptDate > today && 
-             apt.status !== 'cancelled' && 
-             apt.status !== 'completed';
-    });
-  };
-
-  const getPastAppointments = () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return appointments.filter(apt => {
-      const aptDate = new Date(apt.date);
-      aptDate.setHours(0, 0, 0, 0);
-      return aptDate < today || 
-             apt.status === 'completed' || 
-             apt.status === 'cancelled';
-    });
+    return {
+      todayAppointments: appointments.filter(appointment => {
+        const appointmentDate = new Date(appointment.date);
+        appointmentDate.setHours(0, 0, 0, 0);
+        return appointmentDate.getTime() === today.getTime() && 
+               (appointment.status === 'confirmed' || appointment.status === 'pending');
+      }),
+      upcomingAppointments: appointments.filter(appointment => {
+        const appointmentDate = new Date(appointment.date);
+        appointmentDate.setHours(0, 0, 0, 0);
+        return appointmentDate.getTime() > today.getTime() && 
+               appointment.status !== 'cancelled' && 
+               appointment.status !== 'completed';
+      }),
+      pastAppointments: appointments.filter(appointment => {
+        const appointmentDate = new Date(appointment.date);
+        appointmentDate.setHours(0, 0, 0, 0);
+        return appointmentDate.getTime() < today.getTime() || 
+               appointment.status === 'completed' || 
+               appointment.status === 'cancelled';
+      })
+    };
   };
 
   const handleViewPrescription = async (appointment) => {
     try {
       setError(null);
+      setSelectedPrescriptionData(null);
       
       if (!appointment?._id) {
         setError('Invalid appointment data');
@@ -400,15 +405,21 @@ const Dashboard = () => {
 
       console.log('Fetching prescription for appointment:', appointment._id);
       
-      // Fix: Use the correct prescription endpoint
-      const response = await api.get(`/prescriptions/${appointment._id}`);
+      // First get all prescriptions for this doctor
+      const response = await api.get('/prescriptions/doctor');
       
-      if (!response.data) {
-        throw new Error('No prescription data received');
+      // Find the prescription for this appointment
+      const prescriptions = response.data.filter(p => p.appointmentId === appointment._id);
+      
+      // Even if no prescription is found, we'll show the dialog with appointment info
+      setSelectedAppointment(appointment);
+      
+      if (prescriptions && prescriptions.length > 0) {
+        // Get the most recent prescription
+        const prescription = prescriptions[0];
+        setSelectedPrescriptionData(prescription);
       }
-
-      console.log('Prescription data:', response.data);
-      setSelectedPrescriptionData(response.data);
+      
       setViewPrescriptionDialog(true);
     } catch (error) {
       console.error('Error fetching prescription:', error);
@@ -481,8 +492,8 @@ const Dashboard = () => {
     handleCompleteAppointment(selectedAppointment, true);
   };
 
-  const StatCard = ({ icon: Icon, title, value, color }) => (
-    <Card>
+  const StatCard = ({ icon: Icon, title, value, color, onClick }) => (
+    <Card sx={{ cursor: onClick ? 'pointer' : 'default' }} onClick={onClick}>
       <CardContent>
         <Box display="flex" alignItems="center" mb={2}>
           <Icon sx={{ fontSize: 40, color }} />
@@ -497,107 +508,125 @@ const Dashboard = () => {
     </Card>
   );
 
-  const renderAppointmentsTable = () => (
-    <TableContainer component={Paper} sx={{ mt: 3 }}>
-      <Table>
-        <TableHead>
-          <TableRow>
-            <TableCell>Patient Name</TableCell>
-            <TableCell>Date & Time</TableCell>
-            <TableCell>Type</TableCell>
-            <TableCell>Status</TableCell>
-            <TableCell>Actions</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {loading ? (
-            <TableRow>
-              <TableCell colSpan={5} align="center">Loading appointments...</TableCell>
-            </TableRow>
-          ) : filterAppointments().length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={5} align="center">No confirmed appointments found</TableCell>
-            </TableRow>
-          ) : (
-            filterAppointments().map((appointment) => {
-              const patientName = appointment.patientId?.name || 'Unknown Patient';
-              const patientEmail = appointment.patientId?.email || 'No email';
-              const appointmentDate = new Date(appointment.date);
-              const formattedDate = format(appointmentDate, 'MMM dd, yyyy');
-              const formattedTime = appointment.timeSlot || format(appointmentDate, 'HH:mm');
+  const renderAppointmentsTable = () => {
+    if (!appointments.all) return null;
 
-              return (
-                <TableRow key={appointment._id}>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Avatar 
-                        src={appointment.patientId?.profilePhoto} 
-                        alt={patientName}
-                        sx={{ width: 32, height: 32 }}
-                      >
-                        {patientName.charAt(0)}
-                      </Avatar>
-                      <Box>
-                        <Typography variant="body2">{patientName}</Typography>
-                        <Typography variant="caption" color="textSecondary">
-                          {patientEmail}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">{formattedDate}</Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {formattedTime}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>{appointment.type || 'General Checkup'}</TableCell>
-                  <TableCell>
-                    <Chip
-                      label={appointment.status}
-                      color={getStatusColor(appointment.status)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    {appointment.status === 'confirmed' && (
-                      <Box sx={{ display: 'flex', gap: 1 }}>
-                        <Button
-                          variant="contained"
-                          color="primary"
-                          onClick={() => handleAddPrescription(appointment)}
-                        >
-                          Complete with Prescription
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          color="primary"
-                          onClick={() => handleCompleteAppointment(appointment, false)}
-                        >
-                          Complete without Prescription
-                        </Button>
-                      </Box>
-                    )}
-                    {appointment.status === 'completed' && (
-                      <Tooltip title="View Prescription">
-                        <IconButton
-                          color="primary"
-                          size="small"
-                          onClick={() => handleViewPrescription(appointment)}
-                        >
-                          <Assignment />
-                        </IconButton>
-                      </Tooltip>
-                    )}
-                  </TableCell>
+    const renderAppointmentTable = (appointmentList, title, id = null) => (
+      <>
+        {id && <Typography variant="h6" id={id} sx={{ mt: 3, mb: 2 }}>{title}</Typography>}
+        <TableContainer component={Paper} sx={{ mb: 4 }}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Patient Name</TableCell>
+                <TableCell>Date & Time</TableCell>
+                <TableCell>Type</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {appointmentList.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">No {title.toLowerCase()} found</TableCell>
                 </TableRow>
-              );
-            })
-          )}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
+              ) : (
+                appointmentList.map((appointment) => {
+                  const patientName = appointment.patientId?.name || 'Unknown Patient';
+                  const patientEmail = appointment.patientId?.email || 'No email';
+                  const appointmentDate = new Date(appointment.date);
+                  const formattedDate = format(appointmentDate, 'MMM dd, yyyy');
+                  const formattedTime = appointment.timeSlot || format(appointmentDate, 'HH:mm');
+
+                  return (
+                    <TableRow key={appointment._id}>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Avatar 
+                            src={appointment.patientId?.profilePhoto} 
+                            alt={patientName}
+                            sx={{ width: 32, height: 32 }}
+                          >
+                            {patientName.charAt(0)}
+                          </Avatar>
+                          <Box>
+                            <Typography variant="body2">{patientName}</Typography>
+                            <Typography variant="caption" color="textSecondary">
+                              {patientEmail}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">{formattedDate}</Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          {formattedTime}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{appointment.type || 'General Checkup'}</TableCell>
+                      <TableCell>
+                        <Chip
+                          label={appointment.status}
+                          color={getStatusColor(appointment.status)}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        {appointment.status === 'confirmed' && (
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            <Button
+                              variant="contained"
+                              color="primary"
+                              size="small"
+                              onClick={() => handleAddPrescription(appointment)}
+                            >
+                              Complete with Prescription
+                            </Button>
+                            <Button
+                              variant="outlined"
+                              color="primary"
+                              size="small"
+                              onClick={() => handleCompleteAppointment(appointment, false)}
+                            >
+                              Complete
+                            </Button>
+                          </Box>
+                        )}
+                        {appointment.status === 'completed' && (
+                          <Tooltip title="View Prescription">
+                            <IconButton
+                              color="primary"
+                              size="small"
+                              onClick={() => handleViewPrescription(appointment)}
+                            >
+                              <Assignment />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </>
+    );
+
+    return (
+      <>
+        {activeTab === 0 && renderAppointmentTable(appointments.today, "Today's Appointments", 'today-appointments')}
+        {activeTab === 1 && renderAppointmentTable(appointments.upcoming, "Upcoming Appointments", 'upcoming-appointments')}
+        {activeTab === 2 && (
+          <>
+            {renderAppointmentTable(appointments.completed, "Completed Appointments", 'completed-appointments')}
+            {renderAppointmentTable(appointments.cancelled, "Cancelled Appointments", 'cancelled-appointments')}
+          </>
+        )}
+      </>
+    );
+  };
 
   if (loading) {
     return (
@@ -636,16 +665,30 @@ const Dashboard = () => {
           <StatCard
             icon={CalendarToday}
             title="Today's Appointments"
-            value={stats.confirmedAppointments}
+            value={stats.todayAppointments}
             color="primary.main"
+            onClick={() => {
+              setActiveTab(0);
+              const todaySection = document.getElementById('today-appointments');
+              if (todaySection) {
+                todaySection.scrollIntoView({ behavior: 'smooth' });
+              }
+            }}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
             icon={AccessTime}
             title="Pending"
-            value={stats.pendingAppointments}
+            value={stats.upcomingAppointments}
             color="warning.main"
+            onClick={() => {
+              setActiveTab(1);
+              const upcomingSection = document.getElementById('upcoming-appointments');
+              if (upcomingSection) {
+                upcomingSection.scrollIntoView({ behavior: 'smooth' });
+              }
+            }}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
@@ -654,6 +697,13 @@ const Dashboard = () => {
             title="Completed"
             value={stats.completedAppointments}
             color="success.main"
+            onClick={() => {
+              setActiveTab(2);
+              const completedSection = document.getElementById('completed-appointments');
+              if (completedSection) {
+                completedSection.scrollIntoView({ behavior: 'smooth' });
+              }
+            }}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
@@ -662,6 +712,13 @@ const Dashboard = () => {
             title="Total Patients"
             value={stats.totalAppointments}
             color="info.main"
+            onClick={() => {
+              setActiveTab(2);
+              const pastSection = document.getElementById('past-appointments');
+              if (pastSection) {
+                pastSection.scrollIntoView({ behavior: 'smooth' });
+              }
+            }}
           />
         </Grid>
       </Grid>
@@ -670,17 +727,17 @@ const Dashboard = () => {
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
           <Tabs value={activeTab} onChange={handleTabChange}>
             <Tab 
-              label={`Today (${getTodayAppointments().length})`}
+              label={`Today (${appointments.today.length})`}
               icon={<CalendarToday />}
               iconPosition="start"
             />
             <Tab 
-              label={`Upcoming (${getUpcomingAppointments().length})`}
+              label={`Upcoming (${appointments.upcoming.length})`}
               icon={<AccessTime />}
               iconPosition="start"
             />
             <Tab 
-              label={`Past (${getPastAppointments().length})`}
+              label={`History (${appointments.completed.length + appointments.cancelled.length})`}
               icon={<Assignment />}
               iconPosition="start"
             />
@@ -761,49 +818,137 @@ const Dashboard = () => {
       >
         <DialogTitle>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6">Prescription Details</Typography>
+            <Typography variant="h6">Appointment Details</Typography>
             <IconButton onClick={() => setViewPrescriptionDialog(false)}>
               <CloseIcon />
             </IconButton>
           </Box>
         </DialogTitle>
         <DialogContent>
-          {selectedPrescriptionData && (
+          {selectedAppointment && (
             <Box sx={{ pt: 2 }}>
-              <Grid container spacing={2}>
-                <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle1" fontWeight="bold">Patient Information</Typography>
-                  <Typography>Name: {selectedPrescriptionData.patientId?.name || 'N/A'}</Typography>
-                  <Typography>Email: {selectedPrescriptionData.patientId?.email || 'N/A'}</Typography>
-                </Grid>
+              <Grid container spacing={3}>
                 <Grid item xs={12}>
-                  <Typography variant="subtitle1" fontWeight="bold">Prescription Details</Typography>
-                  <Typography>Date: {new Date(selectedPrescriptionData.createdAt).toLocaleDateString()}</Typography>
-                  <Typography>Diagnosis: {selectedPrescriptionData.diagnosis}</Typography>
-                  <Typography variant="subtitle1" fontWeight="bold" sx={{ mt: 2 }}>Medicines</Typography>
-                  {selectedPrescriptionData.medicines.map((medicine, index) => (
-                    <Box key={index} sx={{ ml: 2, mb: 1 }}>
-                      <Typography>
-                        {medicine.name} - {medicine.dosage}
+                  <Paper elevation={0} sx={{ p: 2, bgcolor: 'background.default', borderRadius: 2 }}>
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} md={6}>
+                        <Typography variant="subtitle1" fontWeight="bold" color="primary">
+                          Patient Information
+                        </Typography>
+                        <Typography variant="body1">
+                          Name: {selectedAppointment.patientId?.name || 'N/A'}
+                        </Typography>
+                        <Typography variant="body1">
+                          Email: {selectedAppointment.patientId?.email || 'N/A'}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={12} md={6}>
+                        <Typography variant="subtitle1" fontWeight="bold" color="primary">
+                          Appointment Details
+                        </Typography>
+                        <Typography variant="body1">
+                          Date: {format(new Date(selectedAppointment.date), 'MMM dd, yyyy')}
+                        </Typography>
+                        <Typography variant="body1">
+                          Time: {selectedAppointment.timeSlot}
+                        </Typography>
+                        <Typography variant="body1">
+                          Type: {selectedAppointment.type || 'General Checkup'}
+                        </Typography>
+                        <Chip 
+                          label={selectedAppointment.status}
+                          color={getStatusColor(selectedAppointment.status)}
+                          size="small"
+                          sx={{ mt: 1 }}
+                        />
+                      </Grid>
+                    </Grid>
+                  </Paper>
+                </Grid>
+
+                <Grid item xs={12}>
+                  {selectedPrescriptionData ? (
+                    <Paper elevation={0} sx={{ p: 2, bgcolor: 'background.default', borderRadius: 2 }}>
+                      <Typography variant="subtitle1" fontWeight="bold" color="primary" gutterBottom>
+                        Prescription Details
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">
-                        Frequency: {medicine.frequency}, Duration: {medicine.duration}
+                      <Typography variant="body1" gutterBottom>
+                        Date: {new Date(selectedPrescriptionData.createdAt).toLocaleDateString()}
                       </Typography>
-                    </Box>
-                  ))}
-                  {selectedPrescriptionData.tests && selectedPrescriptionData.tests.length > 0 && (
-                    <>
-                      <Typography variant="subtitle1" fontWeight="bold" sx={{ mt: 2 }}>Tests</Typography>
-                      {selectedPrescriptionData.tests.map((test, index) => (
-                        <Typography key={index} sx={{ ml: 2 }}>{test}</Typography>
-                      ))}
-                    </>
-                  )}
-                  {selectedPrescriptionData.notes && (
-                    <>
-                      <Typography variant="subtitle1" fontWeight="bold" sx={{ mt: 2 }}>Notes</Typography>
-                      <Typography sx={{ whiteSpace: 'pre-line' }}>{selectedPrescriptionData.notes}</Typography>
-                    </>
+                      <Typography variant="body1" gutterBottom>
+                        Diagnosis: {selectedPrescriptionData.diagnosis}
+                      </Typography>
+
+                      {selectedPrescriptionData.medicines?.length > 0 && (
+                        <>
+                          <Typography variant="subtitle2" fontWeight="bold" sx={{ mt: 2, mb: 1 }}>
+                            Medicines
+                          </Typography>
+                          <Grid container spacing={2}>
+                            {selectedPrescriptionData.medicines.map((medicine, index) => (
+                              <Grid item xs={12} key={index}>
+                                <Paper variant="outlined" sx={{ p: 1 }}>
+                                  <Typography variant="body1">
+                                    {medicine.name} - {medicine.dosage}
+                                  </Typography>
+                                  <Typography variant="body2" color="textSecondary">
+                                    Frequency: {medicine.frequency}, Duration: {medicine.duration}
+                                  </Typography>
+                                </Paper>
+                              </Grid>
+                            ))}
+                          </Grid>
+                        </>
+                      )}
+
+                      {selectedPrescriptionData.tests?.length > 0 && (
+                        <>
+                          <Typography variant="subtitle2" fontWeight="bold" sx={{ mt: 2, mb: 1 }}>
+                            Tests
+                          </Typography>
+                          <Grid container spacing={1}>
+                            {selectedPrescriptionData.tests.map((test, index) => (
+                              <Grid item key={index}>
+                                <Chip label={test} variant="outlined" />
+                              </Grid>
+                            ))}
+                          </Grid>
+                        </>
+                      )}
+
+                      {selectedPrescriptionData.notes && (
+                        <>
+                          <Typography variant="subtitle2" fontWeight="bold" sx={{ mt: 2, mb: 1 }}>
+                            Notes
+                          </Typography>
+                          <Paper variant="outlined" sx={{ p: 1 }}>
+                            <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+                              {selectedPrescriptionData.notes}
+                            </Typography>
+                          </Paper>
+                        </>
+                      )}
+                    </Paper>
+                  ) : (
+                    <Paper 
+                      elevation={0} 
+                      sx={{ 
+                        p: 3, 
+                        bgcolor: 'background.default', 
+                        borderRadius: 2,
+                        textAlign: 'center',
+                        border: '1px dashed',
+                        borderColor: 'divider'
+                      }}
+                    >
+                      <Assignment sx={{ fontSize: 40, color: 'text.secondary', mb: 2 }} />
+                      <Typography variant="h6" color="text.secondary" gutterBottom>
+                        No Prescription Available
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        This appointment has been completed but no prescription was issued.
+                      </Typography>
+                    </Paper>
                   )}
                 </Grid>
               </Grid>

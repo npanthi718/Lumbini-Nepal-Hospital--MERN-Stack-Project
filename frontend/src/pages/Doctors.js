@@ -68,24 +68,26 @@ const Doctors = () => {
       try {
         setLoading(true);
         setError("");
-        const response = await axios.get("/api/doctors");
+        const response = await axios.get("http://localhost:5000/api/doctors");
         console.log("Fetched doctors:", response.data);
         if (response.data && Array.isArray(response.data)) {
           const doctorsData = response.data.map((doctor) => ({
             ...doctor,
-            qualifications: doctor.qualifications || [],
+            name: doctor.userId?.name,
+            email: doctor.userId?.email,
+            profilePhoto: doctor.userId?.profilePhoto,
+            education: doctor.education || [],
             languages: doctor.languages || [],
             achievements: doctor.achievements || [],
             publications: doctor.publications || [],
-            ratings: doctor.ratings || { overall: 0, totalReviews: 0 },
+            ratings: { overall: doctor.rating || 0, totalReviews: doctor.totalReviews || 0 }
           }));
           setDoctors(doctorsData);
           // If we have a department from navigation state, filter immediately
           if (location.state?.department) {
             setFilteredDoctors(
               doctorsData.filter(
-                (doctor) =>
-                  doctor.department?.name === location.state.department
+                (doctor) => doctor.department?.name === location.state.department
               )
             );
           } else {
@@ -106,7 +108,7 @@ const Doctors = () => {
 
     const fetchDepartments = async () => {
       try {
-        const response = await axios.get("/api/departments");
+        const response = await axios.get("http://localhost:5000/api/departments");
         if (response.data && Array.isArray(response.data)) {
           setDepartments(response.data);
         }
@@ -307,11 +309,7 @@ const Doctors = () => {
                       mr: 2,
                       objectFit: "cover",
                     }}
-                    src={
-                      doctor.profilePhoto ||
-                      doctor.userId?.profilePhoto ||
-                      defaultDoctorImage
-                    }
+                    src={doctor.profilePhoto || defaultDoctorImage}
                     alt={doctor.name || "Doctor"}
                     onError={(e) => {
                       e.target.src = defaultDoctorImage;
@@ -319,53 +317,48 @@ const Doctors = () => {
                   />
                   <Box>
                     <Typography variant="h6" component="h2" gutterBottom>
-                      {doctor.name ||
-                        "Dr. " + doctor.userId?.name ||
-                        "Doctor Name"}
+                      Dr. {doctor.name || "Unknown"}
                     </Typography>
                     <Typography variant="subtitle2" color="primary">
-                      {doctor.specialization}
+                      {doctor.specialization || "General Medicine"}
                     </Typography>
                   </Box>
                 </Box>
                 <Divider />
                 <CardContent sx={{ flexGrow: 1, pt: 2 }}>
                   <Box sx={{ mb: 2 }}>
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      gutterBottom
-                    >
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
                       Department
                     </Typography>
                     <Typography variant="body1">
-                      {doctor.department?.name}
+                      {doctor.department?.name || 'Department Not Assigned'}
                     </Typography>
                   </Box>
 
                   <Box sx={{ mb: 2 }}>
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      gutterBottom
-                    >
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      Specialization
+                    </Typography>
+                    <Typography variant="body1">
+                      {doctor.specialization || 'Specialization Not Set'}
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
                       Experience
                     </Typography>
                     <Typography variant="body1">
-                      {doctor.experience} years
+                      {doctor.experience || 0} years
                     </Typography>
                   </Box>
 
                   <Box sx={{ mb: 2 }}>
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      gutterBottom
-                    >
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
                       Consultation Fee
                     </Typography>
                     <Typography variant="body1" color="primary.main">
-                      ₹{doctor.consultationFee}
+                      ₹{doctor.consultationFee || 0}
                     </Typography>
                   </Box>
 
@@ -376,11 +369,7 @@ const Doctors = () => {
                       size="small"
                       precision={0.5}
                     />
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      sx={{ ml: 1 }}
-                    >
+                    <Typography variant="body2" color="text.secondary" sx={{ ml: 1 }}>
                       ({doctor.ratings?.totalReviews || 0} reviews)
                     </Typography>
                   </Box>
@@ -421,15 +410,13 @@ const Doctors = () => {
         {selectedDoctor && (
           <>
             <DialogTitle>
-              <Box
-                sx={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
+              <Box sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}>
                 <Typography variant="h5">
-                  {selectedDoctor.userId?.name}
+                  Dr. {selectedDoctor.name || "Unknown"}
                 </Typography>
                 <IconButton onClick={handleCloseDialog}>
                   <CloseIcon />
@@ -441,12 +428,8 @@ const Doctors = () => {
                 <Grid item xs={12} md={4}>
                   <Box sx={{ position: "relative" }}>
                     <img
-                      src={
-                        selectedDoctor.profilePhoto ||
-                        selectedDoctor.userId?.profilePhoto ||
-                        defaultDoctorImage
-                      }
-                      alt={selectedDoctor.userId?.name}
+                      src={selectedDoctor.profilePhoto || defaultDoctorImage}
+                      alt={selectedDoctor.name}
                       style={{ width: "100%", borderRadius: "8px" }}
                     />
                     <Box sx={{ mt: 2 }}>
@@ -456,41 +439,40 @@ const Doctors = () => {
                         precision={0.5}
                       />
                       <Typography variant="body2" color="text.secondary">
-                        {selectedDoctor.ratings?.totalReviews || 0} patient
-                        reviews
+                        {selectedDoctor.ratings?.totalReviews || 0} patient reviews
                       </Typography>
                     </Box>
                   </Box>
                 </Grid>
                 <Grid item xs={12} md={8}>
                   <Typography variant="h6" color="primary" gutterBottom>
-                    {selectedDoctor.specialization}
+                    {selectedDoctor.specialization || "General Medicine"}
                   </Typography>
                   <Typography variant="body1" paragraph>
                     {selectedDoctor.bio ||
-                      `Experienced ${selectedDoctor.specialization} specialist with ${selectedDoctor.experience} years of practice.`}
+                      `Experienced ${selectedDoctor.specialization || "medical"} specialist with ${selectedDoctor.experience || 0} years of practice.`}
                   </Typography>
-                  <Typography variant="subtitle1" gutterBottom>
-                    Speciality
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" paragraph>
-                    {selectedDoctor.specialityDescription ||
-                      selectedDoctor.specialization}
-                  </Typography>
+
+                  <Box sx={{ mb: 3 }}>
+                    <Typography variant="subtitle1" gutterBottom>
+                      Department
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {selectedDoctor.department?.name || "Department Not Assigned"}
+                    </Typography>
+                  </Box>
 
                   <Grid container spacing={2}>
                     <Grid item xs={6}>
                       <Typography variant="subtitle1">Experience</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {selectedDoctor.experience} years
+                        {selectedDoctor.experience || 0} years
                       </Typography>
                     </Grid>
                     <Grid item xs={6}>
-                      <Typography variant="subtitle1">
-                        Consultation Fee
-                      </Typography>
+                      <Typography variant="subtitle1">Consultation Fee</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        ₹{selectedDoctor.consultationFee}
+                        ₹{selectedDoctor.consultationFee || 0}
                       </Typography>
                     </Grid>
                   </Grid>
@@ -499,23 +481,25 @@ const Doctors = () => {
                     <Typography variant="subtitle1" gutterBottom>
                       Education
                     </Typography>
-                    <List dense>
-                      {(selectedDoctor.qualifications || []).map(
-                        (edu, index) => (
+                    {selectedDoctor.education && selectedDoctor.education.length > 0 ? (
+                      <List dense>
+                        {selectedDoctor.education.map((edu, index) => (
                           <ListItem key={index}>
                             <ListItemIcon>
-                              <School />
+                              <School fontSize="small" />
                             </ListItemIcon>
                             <ListItemText
                               primary={edu.degree}
-                              secondary={`${edu.institution} (${edu.year})${
-                                edu.honors ? ` - ${edu.honors}` : ""
-                              }`}
+                              secondary={`${edu.institution} (${edu.year})${edu.honors ? ` - ${edu.honors}` : ''}`}
                             />
                           </ListItem>
-                        )
-                      )}
-                    </List>
+                        ))}
+                      </List>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        Education details not provided.
+                      </Typography>
+                    )}
                   </Box>
 
                   <Box sx={{ mt: 3 }}>

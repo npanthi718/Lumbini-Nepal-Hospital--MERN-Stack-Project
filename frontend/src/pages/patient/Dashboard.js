@@ -35,8 +35,13 @@ import {
   LocalHospital,
   History,
   Assignment,
+  Close,
+  Event,
+  CheckCircle,
+  Cancel,
 } from '@mui/icons-material';
 import { format, addDays } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 
 // Create an axios instance with base URL and default headers
 const api = axios.create({
@@ -98,6 +103,7 @@ api.interceptors.response.use(
 
 const Dashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(0);
   const [appointments, setAppointments] = useState([]);
   const [prescriptions, setPrescriptions] = useState([]);
@@ -119,21 +125,32 @@ const Dashboard = () => {
           throw new Error('User ID not found');
         }
 
-        console.log('Current user:', user);
-        console.log('Fetching data with token:', localStorage.getItem('token'));
+        // Fetch appointments with proper population
+        const appointmentsRes = await api.get('/api/patients/appointments');
 
-        const [appointmentsRes, prescriptionsRes] = await Promise.all([
-          api.get('/api/patient/appointments'),
-          api.get('/api/patient/prescriptions')
-        ]);
+        // Fetch prescriptions with proper endpoint
+        const prescriptionsRes = await api.get('/api/patients/prescriptions');
 
-        setAppointments(appointmentsRes.data);
-        setPrescriptions(prescriptionsRes.data);
+        console.log('Appointments data:', appointmentsRes.data);
+        console.log('Prescriptions data:', prescriptionsRes.data);
+
+        if (Array.isArray(appointmentsRes.data)) {
+          setAppointments(appointmentsRes.data);
+        } else {
+          console.error('Invalid appointments data format:', appointmentsRes.data);
+          throw new Error('Invalid appointments data received');
+        }
+
+        if (Array.isArray(prescriptionsRes.data)) {
+          setPrescriptions(prescriptionsRes.data);
+        } else {
+          console.error('Invalid prescriptions data format:', prescriptionsRes.data);
+          throw new Error('Invalid prescriptions data received');
+        }
 
       } catch (err) {
         console.error('Failed to fetch dashboard data:', err);
-        const errorMessage = err.response?.data?.message || err.message;
-        setError(`Failed to fetch dashboard data: ${errorMessage}. Please try again later.`);
+        setError(err.response?.data?.message || err.message || 'Failed to fetch data');
       } finally {
         setLoading(false);
       }
@@ -197,58 +214,9 @@ const Dashboard = () => {
     }
   };
 
-  const handleRebook = async (oldAppointment) => {
-    try {
-      setError(null);
-      setSuccess(null);
-
-      // Validate appointment data
-      if (!oldAppointment) {
-        setError('Invalid appointment data for rebooking');
-        return;
-      }
-
-      // Log the appointment data for debugging
-      console.log('Attempting to rebook appointment:', oldAppointment);
-
-      // Validate required fields
-      if (!oldAppointment.doctorId) {
-        setError('Missing doctor information for rebooking');
-        return;
-      }
-
-      // Create a new appointment with the same doctor and type
-      const newAppointmentData = {
-        doctorId: oldAppointment.doctorId,
-        type: oldAppointment.type || 'General Checkup',
-        symptoms: oldAppointment.symptoms || '',
-        notes: `Rebooking from cancelled appointment on ${format(new Date(oldAppointment.date), 'MMM dd, yyyy')}`,
-        date: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
-        timeSlot: '09:00 AM',
-        status: 'pending'
-      };
-
-      console.log('New appointment data:', newAppointmentData);
-
-      // Make the API call to create a new appointment
-      const response = await api.post('/api/appointments', newAppointmentData);
-      console.log('Rebook response:', response.data);
-
-      setSuccess('Appointment rebooked successfully. Please wait for confirmation.');
-      
-      // Refresh the appointments list
-      await fetchAppointments();
-      
-    } catch (error) {
-      console.error('Error rebooking appointment:', error);
-      const errorMessage = error.response?.data?.message || error.message || 'Failed to rebook appointment';
-      setError(`Rebooking failed: ${errorMessage}. Please try again.`);
-    }
-  };
-
   const fetchAppointments = async () => {
     try {
-      const appointmentsRes = await api.get('/api/patient/appointments');
+      const appointmentsRes = await api.get('/api/patients/appointments');
       setAppointments(appointmentsRes.data);
     } catch (error) {
       console.error('Error fetching appointments:', error);
@@ -256,84 +224,93 @@ const Dashboard = () => {
     }
   };
 
-  const renderAppointments = () => (
-    <TableContainer component={Paper}>
-      <Table>
-        <TableHead>
-          <TableRow>
-            <TableCell>Doctor</TableCell>
-            <TableCell>Date & Time</TableCell>
-            <TableCell>Type</TableCell>
-            <TableCell>Status</TableCell>
-            <TableCell>Actions</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {appointments.map((appointment) => (
-            <TableRow key={appointment._id}>
-              <TableCell>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Avatar>
-                    {appointment.doctorId?.userId?.name?.charAt(0) || 'D'}
-                  </Avatar>
-                  <Box>
-                    <Typography variant="body2">
-                      {appointment.doctorId?.userId?.name || 'Unknown Doctor'}
-                    </Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {appointment.doctorId?.specialization || 'General'}
-                    </Typography>
-                  </Box>
-                </Box>
-              </TableCell>
-              <TableCell>
-                <Typography variant="body2">
-                  {format(new Date(appointment.date), 'MMM dd, yyyy')}
-                </Typography>
-                <Typography variant="caption" color="textSecondary">
-                  {appointment.timeSlot}
-                </Typography>
-              </TableCell>
-              <TableCell>{appointment.type || 'General Checkup'}</TableCell>
-              <TableCell>
-                <Chip
-                  label={appointment.status}
-                  color={getStatusColor(appointment.status)}
-                  size="small"
-                />
-                {appointment.status === 'cancelled' && appointment.cancellationReason && (
-                  <Typography variant="caption" color="error" display="block" sx={{ mt: 0.5 }}>
-                    Reason: {appointment.cancellationReason}
-                  </Typography>
-                )}
-              </TableCell>
-              <TableCell>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => handleViewAppointment(appointment)}
-                  >
-                    View Details
-                  </Button>
-                  {appointment.status === 'cancelled' && (
-                    <Button
-                      size="small"
-                      variant="contained"
-                      color="primary"
-                      onClick={() => handleRebook(appointment)}
-                    >
-                      Rebook
-                    </Button>
-                  )}
-                </Box>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
+  const renderAppointments = () => {
+    // Filter appointments by status
+    const approvedAppointments = appointments.filter(apt => apt.status === 'confirmed');
+    const pendingAppointments = appointments.filter(apt => apt.status === 'pending');
+    const completedAppointments = appointments.filter(apt => apt.status === 'completed');
+    const cancelledAppointments = appointments.filter(apt => apt.status === 'cancelled');
+
+    const renderAppointmentSection = (appointments, title, id) => (
+      <>
+        <Typography variant="h6" sx={{ mt: 4, mb: 2 }} id={id}>
+          {title}
+        </Typography>
+        <TableContainer component={Paper} sx={{ mb: 4 }}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Date</TableCell>
+                <TableCell>Doctor</TableCell>
+                <TableCell>Department</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {appointments.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">No {title.toLowerCase()} found</TableCell>
+                </TableRow>
+              ) : (
+                appointments.map((appointment) => (
+                  <TableRow key={appointment._id}>
+                    <TableCell>
+                      {format(new Date(appointment.date), 'MMM dd, yyyy')}
+                      <Typography variant="caption" display="block" color="textSecondary">
+                        {appointment.timeSlot}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Avatar sx={{ mr: 1 }}>
+                          {appointment.doctorId?.name?.charAt(0) || 'D'}
+                        </Avatar>
+                        <Box>
+                          <Typography variant="subtitle2">
+                            {appointment.doctorId?.name || 'Unknown Doctor'}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary">
+                            {appointment.doctorId?.email || 'No email'}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </TableCell>
+                    <TableCell>{appointment.doctorId?.department?.name || 'N/A'}</TableCell>
+                    <TableCell>
+                      <Chip
+                        label={appointment.status}
+                        color={getStatusColor(appointment.status)}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => handleViewAppointment(appointment)}
+                      >
+                        View Details
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </>
+    );
+
+    return (
+      <Box>
+        {renderAppointmentSection(approvedAppointments, "Approved Appointments", "approved-appointments")}
+        {renderAppointmentSection(pendingAppointments, "Pending Appointments", "pending-appointments")}
+        {renderAppointmentSection(completedAppointments, "Completed Appointments", "completed-appointments")}
+        {renderAppointmentSection(cancelledAppointments, "Cancelled Appointments", "cancelled-appointments")}
+      </Box>
+    );
+  };
 
   if (loading) {
     return (
@@ -370,13 +347,18 @@ const Dashboard = () => {
       {/* Stats Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card sx={{ cursor: 'pointer' }} onClick={() => {
+            const approvedSection = document.getElementById('approved-appointments');
+            if (approvedSection) {
+              approvedSection.scrollIntoView({ behavior: 'smooth' });
+            }
+          }}>
             <CardContent>
               <Box display="flex" alignItems="center">
-                <CalendarToday color="primary" sx={{ mr: 2 }} />
+                <Event color="primary" sx={{ mr: 2 }} />
                 <Box>
                   <Typography color="textSecondary" gutterBottom>
-                    Upcoming Appointments
+                    Approved Appointments
                   </Typography>
                   <Typography variant="h5">
                     {appointments.filter(a => a.status === 'confirmed').length}
@@ -387,7 +369,12 @@ const Dashboard = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card sx={{ cursor: 'pointer' }} onClick={() => {
+            const pendingSection = document.getElementById('pending-appointments');
+            if (pendingSection) {
+              pendingSection.scrollIntoView({ behavior: 'smooth' });
+            }
+          }}>
             <CardContent>
               <Box display="flex" alignItems="center">
                 <AccessTime color="warning" sx={{ mr: 2 }} />
@@ -404,13 +391,18 @@ const Dashboard = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card sx={{ cursor: 'pointer' }} onClick={() => {
+            const completedSection = document.getElementById('completed-appointments');
+            if (completedSection) {
+              completedSection.scrollIntoView({ behavior: 'smooth' });
+            }
+          }}>
             <CardContent>
               <Box display="flex" alignItems="center">
-                <History color="success" sx={{ mr: 2 }} />
+                <CheckCircle color="success" sx={{ mr: 2 }} />
                 <Box>
                   <Typography color="textSecondary" gutterBottom>
-                    Past Appointments
+                    Completed Appointments
                   </Typography>
                   <Typography variant="h5">
                     {appointments.filter(a => a.status === 'completed').length}
@@ -421,7 +413,31 @@ const Dashboard = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
-          <Card>
+          <Card sx={{ cursor: 'pointer' }} onClick={() => {
+            const cancelledSection = document.getElementById('cancelled-appointments');
+            if (cancelledSection) {
+              cancelledSection.scrollIntoView({ behavior: 'smooth' });
+            }
+          }}>
+            <CardContent>
+              <Box display="flex" alignItems="center">
+                <Cancel color="error" sx={{ mr: 2 }} />
+                <Box>
+                  <Typography color="textSecondary" gutterBottom>
+                    Cancelled Appointments
+                  </Typography>
+                  <Typography variant="h5">
+                    {appointments.filter(a => a.status === 'cancelled').length}
+                  </Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ cursor: 'pointer' }} onClick={() => {
+            setActiveTab(1);
+          }}>
             <CardContent>
               <Box display="flex" alignItems="center">
                 <LocalHospital color="info" sx={{ mr: 2 }} />
@@ -449,7 +465,10 @@ const Dashboard = () => {
 
       {/* Appointments Table */}
       {activeTab === 0 && (
-        renderAppointments()
+        <>
+          <Typography variant="h6" id="upcoming-appointments" sx={{ mb: 2 }}>Upcoming Appointments</Typography>
+          {renderAppointments()}
+        </>
       )}
 
       {/* Prescriptions Table */}
@@ -471,9 +490,16 @@ const Dashboard = () => {
                   <TableCell>
                     {new Date(prescription.createdAt).toLocaleDateString()}
                   </TableCell>
-                  <TableCell>{prescription.doctorId?.userId?.name || 'Unknown Doctor'}</TableCell>
-                  <TableCell>{prescription.doctorId?.department?.name || 'N/A'}</TableCell>
-                  <TableCell>{prescription.diagnosis.substring(0, 50)}...</TableCell>
+                  <TableCell>
+                    {prescription.doctorId?.userId?.name || 'Unknown Doctor'}
+                  </TableCell>
+                  <TableCell>
+                    {prescription.doctorId?.department?.name || 'N/A'}
+                  </TableCell>
+                  <TableCell>
+                    {prescription.diagnosis?.substring(0, 50) || 'N/A'}
+                    {prescription.diagnosis?.length > 50 ? '...' : ''}
+                  </TableCell>
                   <TableCell>
                     <Button
                       variant="outlined"
@@ -488,9 +514,7 @@ const Dashboard = () => {
               {prescriptions.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} align="center">
-                    <Typography variant="body1" color="textSecondary">
-                      No prescriptions found
-                    </Typography>
+                    No prescriptions found
                   </TableCell>
                 </TableRow>
               )}
@@ -505,21 +529,47 @@ const Dashboard = () => {
         onClose={() => setViewAppointmentDialog(false)}
         maxWidth="md"
         fullWidth
+        aria-labelledby="appointment-dialog-title"
+        disablePortal={false}
+        keepMounted={false}
+        disableEnforceFocus={false}
+        disableAutoFocus={false}
       >
-        <DialogTitle>Appointment Details</DialogTitle>
+        <DialogTitle id="appointment-dialog-title">
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">Appointment Details</Typography>
+            <IconButton
+              aria-label="close"
+              onClick={() => setViewAppointmentDialog(false)}
+              sx={{
+                position: 'absolute',
+                right: 8,
+                top: 8,
+              }}
+            >
+              <Close />
+            </IconButton>
+          </Box>
+        </DialogTitle>
         <DialogContent>
           {selectedViewAppointment && (
             <Box sx={{ pt: 2 }}>
               <Grid container spacing={2}>
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle1" gutterBottom>
-                    <strong>Doctor:</strong> {selectedViewAppointment.doctorId?.userId?.name || 'N/A'}
+                    <strong>Doctor:</strong> {selectedViewAppointment.doctorId?.name || 'Not Available'}
                   </Typography>
                   <Typography variant="subtitle1" gutterBottom>
-                    <strong>Department:</strong> {selectedViewAppointment.doctorId?.department?.name || 'N/A'}
+                    <strong>Email:</strong> {selectedViewAppointment.doctorId?.email || 'Not Available'}
                   </Typography>
                   <Typography variant="subtitle1" gutterBottom>
-                    <strong>Specialization:</strong> {selectedViewAppointment.doctorId?.specialization || 'N/A'}
+                    <strong>Phone:</strong> {selectedViewAppointment.doctorId?.phone || 'Not Available'}
+                  </Typography>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Department:</strong> {selectedViewAppointment.doctorId?.department?.name || 'Not Available'}
+                  </Typography>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Specialization:</strong> {selectedViewAppointment.doctorId?.specialization || 'Not Available'}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
@@ -527,7 +577,7 @@ const Dashboard = () => {
                     <strong>Date:</strong> {format(new Date(selectedViewAppointment.date), 'MMM dd, yyyy')}
                   </Typography>
                   <Typography variant="subtitle1" gutterBottom>
-                    <strong>Time:</strong> {selectedViewAppointment.timeSlot || 'N/A'}
+                    <strong>Time:</strong> {selectedViewAppointment.timeSlot}
                   </Typography>
                   <Typography variant="subtitle1" gutterBottom>
                     <strong>Status:</strong> 
@@ -538,11 +588,11 @@ const Dashboard = () => {
                       sx={{ ml: 1 }}
                     />
                   </Typography>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Type:</strong> {selectedViewAppointment.type}
+                  </Typography>
                 </Grid>
                 <Grid item xs={12}>
-                  <Typography variant="subtitle1" gutterBottom>
-                    <strong>Type:</strong> {selectedViewAppointment.type || 'General Checkup'}
-                  </Typography>
                   {selectedViewAppointment.symptoms && (
                     <>
                       <Typography variant="subtitle1" gutterBottom>
@@ -563,16 +613,6 @@ const Dashboard = () => {
                       </Typography>
                     </>
                   )}
-                  {selectedViewAppointment.status === 'cancelled' && selectedViewAppointment.cancellationReason && (
-                    <>
-                      <Typography variant="subtitle1" gutterBottom color="error">
-                        <strong>Cancellation Reason:</strong>
-                      </Typography>
-                      <Typography paragraph sx={{ ml: 2 }} color="error">
-                        {selectedViewAppointment.cancellationReason}
-                      </Typography>
-                    </>
-                  )}
                 </Grid>
               </Grid>
             </Box>
@@ -586,10 +626,15 @@ const Dashboard = () => {
               color="primary"
               onClick={() => {
                 setViewAppointmentDialog(false);
-                handleRebook(selectedViewAppointment);
+                navigate('/appointments', {
+                  state: {
+                    selectedDoctor: selectedViewAppointment.doctorId,
+                    isNewBooking: true
+                  }
+                });
               }}
             >
-              Rebook Appointment
+              Book New Appointment
             </Button>
           )}
         </DialogActions>
@@ -601,8 +646,28 @@ const Dashboard = () => {
         onClose={handleClosePrescriptionDialog}
         maxWidth="md"
         fullWidth
+        aria-labelledby="prescription-dialog-title"
+        disablePortal={false}
+        keepMounted={false}
+        disableEnforceFocus={false}
+        disableAutoFocus={false}
       >
-        <DialogTitle>Prescription Details</DialogTitle>
+        <DialogTitle id="prescription-dialog-title">
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">Prescription Details</Typography>
+            <IconButton
+              aria-label="close"
+              onClick={handleClosePrescriptionDialog}
+              sx={{
+                position: 'absolute',
+                right: 8,
+                top: 8,
+              }}
+            >
+              <Close />
+            </IconButton>
+          </Box>
+        </DialogTitle>
         <DialogContent>
           {selectedPrescription && (
             <Box>
@@ -619,21 +684,59 @@ const Dashboard = () => {
               <Typography variant="subtitle1" gutterBottom>
                 <strong>Diagnosis:</strong>
               </Typography>
-              <Typography paragraph sx={{ whiteSpace: 'pre-line' }}>
+              <Typography paragraph sx={{ whiteSpace: 'pre-line', mb: 2 }}>
                 {selectedPrescription.diagnosis}
               </Typography>
+              
               <Typography variant="subtitle1" gutterBottom>
-                <strong>Prescription:</strong>
+                <strong>Medications:</strong>
+              </Typography>
+              {selectedPrescription.medications && selectedPrescription.medications.length > 0 ? (
+                <TableContainer component={Paper} sx={{ mb: 2 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell><strong>Medicine</strong></TableCell>
+                        <TableCell><strong>Dosage</strong></TableCell>
+                        <TableCell><strong>Frequency</strong></TableCell>
+                        <TableCell><strong>Duration</strong></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {selectedPrescription.medications.map((med, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{med.name}</TableCell>
+                          <TableCell>{med.dosage}</TableCell>
+                          <TableCell>{med.frequency}</TableCell>
+                          <TableCell>{med.duration}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Typography color="text.secondary" sx={{ ml: 2, mb: 2 }}>
+                  No medications prescribed
+                </Typography>
+              )}
+
+              <Typography variant="subtitle1" gutterBottom>
+                <strong>Additional Instructions:</strong>
               </Typography>
               <Typography paragraph sx={{ whiteSpace: 'pre-line' }}>
                 {selectedPrescription.prescription}
               </Typography>
-              <Typography variant="subtitle1" gutterBottom>
-                <strong>Notes:</strong>
-              </Typography>
-              <Typography paragraph sx={{ whiteSpace: 'pre-line' }}>
-                {selectedPrescription.notes}
-              </Typography>
+
+              {selectedPrescription.notes && (
+                <>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>Notes:</strong>
+                  </Typography>
+                  <Typography paragraph sx={{ whiteSpace: 'pre-line' }}>
+                    {selectedPrescription.notes}
+                  </Typography>
+                </>
+              )}
             </Box>
           )}
         </DialogContent>

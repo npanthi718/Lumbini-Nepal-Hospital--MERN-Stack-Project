@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const User = require('../models/user.model');
-const { auth, authorize } = require('../middleware/auth');
+const { authenticateToken, isAdmin } = require('../middleware/auth');
 
 // Validation middleware
 const validateUserUpdate = [
@@ -13,7 +13,7 @@ const validateUserUpdate = [
 ];
 
 // Get all users (admin only)
-router.get('/', auth, authorize('admin'), async (req, res) => {
+router.get('/', authenticateToken, isAdmin, async (req, res) => {
     try {
         const users = await User.find().select('-password');
         res.json(users);
@@ -23,7 +23,7 @@ router.get('/', auth, authorize('admin'), async (req, res) => {
 });
 
 // Get user by ID (admin only)
-router.get('/:id', auth, authorize('admin'), async (req, res) => {
+router.get('/:id', authenticateToken, isAdmin, async (req, res) => {
     try {
         const user = await User.findById(req.params.id).select('-password');
         if (!user) {
@@ -36,7 +36,7 @@ router.get('/:id', auth, authorize('admin'), async (req, res) => {
 });
 
 // Update user profile
-router.put('/profile', auth, validateUserUpdate, async (req, res) => {
+router.put('/profile', authenticateToken, validateUserUpdate, async (req, res) => {
     try {
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
@@ -61,7 +61,7 @@ router.put('/profile', auth, validateUserUpdate, async (req, res) => {
 });
 
 // Update user status (admin only)
-router.patch('/:id/status', auth, authorize('admin'), async (req, res) => {
+router.patch('/:id/status', authenticateToken, isAdmin, async (req, res) => {
     try {
         const { isActive } = req.body;
         const user = await User.findById(req.params.id);
@@ -80,7 +80,7 @@ router.patch('/:id/status', auth, authorize('admin'), async (req, res) => {
 });
 
 // Delete user (admin only)
-router.delete('/:id', auth, authorize('admin'), async (req, res) => {
+router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
     try {
         const user = await User.findById(req.params.id);
         if (!user) {
@@ -95,7 +95,7 @@ router.delete('/:id', auth, authorize('admin'), async (req, res) => {
 });
 
 // Get user statistics (admin only)
-router.get('/stats/overview', auth, authorize('admin'), async (req, res) => {
+router.get('/stats/overview', authenticateToken, isAdmin, async (req, res) => {
     try {
         const stats = await Promise.all([
             User.countDocuments({ role: 'patient' }),

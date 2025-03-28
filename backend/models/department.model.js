@@ -11,14 +11,24 @@ const departmentSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  head: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Doctor'
-  },
-  doctors: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Doctor'
+  specializations: [{
+    type: String
   }],
+  services: [{
+    type: String
+  }],
+  facilities: [{
+    type: String
+  }],
+  workingHours: {
+    monday: String,
+    tuesday: String,
+    wednesday: String,
+    thursday: String,
+    friday: String,
+    saturday: String,
+    sunday: String
+  },
   status: {
     type: String,
     enum: ['active', 'inactive'],

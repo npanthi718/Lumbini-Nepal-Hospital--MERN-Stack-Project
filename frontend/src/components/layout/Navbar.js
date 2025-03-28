@@ -30,6 +30,8 @@ import {
   People,
   Settings,
   ExitToApp,
+  Info,
+  ContactSupport,
 } from '@mui/icons-material';
 import { useAuth } from '../../context/AuthContext';
 
@@ -73,6 +75,8 @@ const Navbar = () => {
         { text: 'Home', path: '/', icon: <Dashboard /> },
         { text: 'Doctors', path: '/doctors', icon: <LocalHospital /> },
         { text: 'Departments', path: '/departments', icon: <People /> },
+        { text: 'About Us', path: '/aboutus', icon: <Info /> },
+        { text: 'Contact Us', path: '/contact', icon: <ContactSupport /> },
         { text: 'Login', path: '/login', icon: <Person /> },
         { text: 'Register', path: '/register', icon: <Person /> },
       ];
@@ -80,6 +84,8 @@ const Navbar = () => {
 
     const commonItems = [
       { text: 'Dashboard', path: `/${user.role}/dashboard`, icon: <Dashboard /> },
+      { text: 'About Us', path: '/aboutus', icon: <Info /> },
+      { text: 'Contact Us', path: '/contact', icon: <ContactSupport /> },
     ];
 
     switch (user.role) {
@@ -106,9 +112,9 @@ const Navbar = () => {
   };
 
   const drawer = (
-    <div>
+    <Box sx={{ width: { xs: 250, sm: 300 } }}>
       <Toolbar>
-        <Typography variant="h6" noWrap component="div">
+        <Typography variant="h6" noWrap component="div" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
           Lumbini Nepal Hospital
         </Typography>
       </Toolbar>
@@ -121,16 +127,31 @@ const Navbar = () => {
             component={RouterLink}
             to={item.path}
             onClick={handleDrawerToggle}
+            sx={{
+              py: 1.5,
+              '&:hover': {
+                backgroundColor: theme.palette.action.hover,
+              },
+            }}
           >
-            <ListItemIcon>{item.icon}</ListItemIcon>
+            <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
             <ListItemText primary={item.text} />
           </ListItem>
         ))}
         {user && (
           <>
             <Divider />
-            <ListItem button onClick={handleLogout}>
-              <ListItemIcon>
+            <ListItem
+              button
+              onClick={handleLogout}
+              sx={{
+                py: 1.5,
+                '&:hover': {
+                  backgroundColor: theme.palette.action.hover,
+                },
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 40 }}>
                 <ExitToApp />
               </ListItemIcon>
               <ListItemText primary="Logout" />
@@ -138,7 +159,7 @@ const Navbar = () => {
           </>
         )}
       </List>
-    </div>
+    </Box>
   );
 
   if (loading) {
@@ -155,34 +176,61 @@ const Navbar = () => {
 
   return (
     <>
-      <AppBar position="static">
-        <Toolbar>
-          {isMobile && (
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={handleDrawerToggle}
-              sx={{ mr: 2 }}
+      <AppBar position="sticky" sx={{ zIndex: theme.zIndex.drawer + 1 }}>
+        <Toolbar sx={{ 
+          justifyContent: 'space-between',
+          minHeight: { xs: '56px', sm: '64px' },
+          px: { xs: 1, sm: 2 },
+          gap: 1
+        }}>
+          <Box sx={{ 
+            display: 'flex', 
+            alignItems: 'center',
+            minWidth: 'fit-content'
+          }}>
+            {isMobile && (
+              <IconButton
+                color="inherit"
+                aria-label="open drawer"
+                edge="start"
+                onClick={handleDrawerToggle}
+                sx={{ mr: 1 }}
+              >
+                <MenuIcon />
+              </IconButton>
+            )}
+            <Typography
+              variant="h6"
+              component={RouterLink}
+              to="/"
+              sx={{
+                textDecoration: 'none',
+                color: 'inherit',
+                fontWeight: 600,
+                fontSize: { xs: '0.9rem', sm: '1.1rem', md: '1.25rem' },
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: { xs: '180px', sm: '240px', md: '300px' }
+              }}
             >
-              <MenuIcon />
-            </IconButton>
-          )}
-          <Typography
-            variant="h6"
-            component={RouterLink}
-            to="/"
-            sx={{
-              flexGrow: 1,
-              textDecoration: 'none',
-              color: 'inherit',
-              fontWeight: 600,
-            }}
-          >
-            Lumbini Nepal Hospital
-          </Typography>
+              Lumbini Nepal Hospital
+            </Typography>
+          </Box>
+
           {!isMobile && (
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: { sm: 0.5, md: 1 },
+                mx: { sm: 1, md: 2 },
+                flexGrow: 1,
+                justifyContent: 'center',
+                overflow: 'visible',
+                flexWrap: 'nowrap'
+              }}
+            >
               {getMenuItems().map((item) => (
                 <Button
                   key={item.text}
@@ -191,7 +239,12 @@ const Navbar = () => {
                   to={item.path}
                   startIcon={item.icon}
                   sx={{
-                    mx: 1,
+                    minWidth: { sm: '80px', md: 'auto' },
+                    px: { sm: 0.75, md: 1.5 },
+                    py: 0.5,
+                    fontSize: { sm: '0.75rem', md: '0.875rem' },
+                    whiteSpace: 'nowrap',
+                    textTransform: 'none',
                     '&:hover': {
                       backgroundColor: 'rgba(255, 255, 255, 0.1)',
                     },
@@ -200,20 +253,23 @@ const Navbar = () => {
                   {item.text}
                 </Button>
               ))}
-              {user && (
-                <IconButton
-                  color="inherit"
-                  onClick={handleMenuOpen}
-                  sx={{
-                    ml: 2,
-                    '&:hover': {
-                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                    },
-                  }}
-                >
-                  <Person />
-                </IconButton>
-              )}
+            </Box>
+          )}
+
+          {user && !isMobile && (
+            <Box sx={{ minWidth: 'fit-content' }}>
+              <IconButton
+                color="inherit"
+                onClick={handleMenuOpen}
+                sx={{
+                  ml: 1,
+                  '&:hover': {
+                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  },
+                }}
+              >
+                <Person />
+              </IconButton>
             </Box>
           )}
         </Toolbar>
@@ -271,7 +327,10 @@ const Navbar = () => {
         }}
         PaperProps={{
           sx: {
-            width: 280,
+            width: { xs: 250, sm: 300 },
+            '& .MuiDrawer-paper': {
+              width: { xs: 250, sm: 300 },
+            },
           },
         }}
       >

@@ -3,7 +3,7 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const Appointment = require('../models/appointment.model');
 const Doctor = require('../models/doctor.model');
-const { auth, authorize } = require('../middleware/auth');
+const { authenticateToken, isAdmin } = require('../middleware/auth');
 
 // Validation middleware
 const validateAppointment = [
@@ -16,14 +16,19 @@ const validateAppointment = [
 ];
 
 // Create appointment (patient only)
-router.post('/', auth, authorize('patient'), validateAppointment, async (req, res) => {
+router.post('/', authenticateToken, async (req, res) => {
     try {
+        // Check if user is a patient
+        if (req.user.role !== 'patient') {
+            return res.status(403).json({ message: 'Only patients can create appointments' });
+        }
+
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { doctorId, date, timeSlot, type, symptoms, notes } = req.body;
+        const { doctorId, date, time, type, symptoms, notes } = req.body;
 
         // Check if doctor exists and is approved
         const doctor = await Doctor.findById(doctorId);
@@ -35,11 +40,38 @@ router.post('/', auth, authorize('patient'), validateAppointment, async (req, re
             return res.status(400).json({ message: 'Doctor is not currently available for appointments' });
         }
 
+        // Validate the time slot against doctor's availability
+        const requestDate = new Date(date);
+        const dayOfWeek = requestDate.getDay();
+        const dayAvailability = doctor.availability.find(a => a.dayOfWeek === dayOfWeek);
+
+        if (!dayAvailability || !dayAvailability.isAvailable) {
+            return res.status(400).json({ message: 'Doctor is not available on this day' });
+        }
+
+        // Check if the time is within doctor's working hours
+        const [timeHour, timeMinute] = time.split(':').map(Number);
+        const [startHour, startMinute] = dayAvailability.startTime.split(':').map(Number);
+        const [endHour, endMinute] = dayAvailability.endTime.split(':').map(Number);
+
+        const appointmentTime = new Date(requestDate);
+        appointmentTime.setHours(timeHour, timeMinute, 0);
+
+        const startTime = new Date(requestDate);
+        startTime.setHours(startHour, startMinute, 0);
+
+        const endTime = new Date(requestDate);
+        endTime.setHours(endHour, endMinute, 0);
+
+        if (appointmentTime < startTime || appointmentTime >= endTime) {
+            return res.status(400).json({ message: 'Selected time is outside doctor\'s working hours' });
+        }
+
         // Check if time slot is available
         const existingAppointment = await Appointment.findOne({
             doctorId,
             date,
-            timeSlot,
+            timeSlot: time,
             status: { $nin: ['cancelled'] }
         });
 
@@ -52,7 +84,7 @@ router.post('/', auth, authorize('patient'), validateAppointment, async (req, re
             patientId: req.user._id,
             doctorId,
             date,
-            timeSlot,
+            timeSlot: time,
             type,
             symptoms: symptoms || '',
             notes: notes || '',
@@ -63,8 +95,11 @@ router.post('/', auth, authorize('patient'), validateAppointment, async (req, re
         
         // Populate doctor details before sending response
         await appointment.populate([
-            { path: 'doctorId', populate: { path: 'userId', select: 'name email' } },
-            { path: 'patientId', select: 'name email' }
+            { path: 'doctorId', populate: [
+                { path: 'userId', select: 'name email' },
+                { path: 'department', select: 'name' }
+            ]},
+            { path: 'patientId', select: 'name email phone' }
         ]);
 
         res.status(201).json(appointment);
@@ -75,7 +110,7 @@ router.post('/', auth, authorize('patient'), validateAppointment, async (req, re
 });
 
 // Get appointments
-router.get('/', auth, async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
     try {
         let appointments;
         
@@ -85,17 +120,40 @@ router.get('/', auth, async (req, res) => {
                     path: 'doctorId',
                     populate: [
                         { 
-                            path: 'userId', 
-                            select: 'name email profilePhoto' 
+                            path: 'userId',
+                            select: 'name email phone'
                         },
                         { 
                             path: 'department',
                             select: 'name'
+                        },
+                        {
+                            path: 'specialization',
+                            select: 'name'
                         }
                     ]
                 })
-                .populate('patientId', 'name email profilePhoto')
-                .sort({ date: -1 }); // Sort by date descending
+                .sort({ date: -1 });
+
+            // Transform the data
+            appointments = appointments.map(appointment => {
+                const doctor = appointment.doctorId;
+                return {
+                    ...appointment.toObject(),
+                    doctorId: {
+                        ...doctor,
+                        name: doctor?.userId?.name || 'Doctor Not Available',
+                        email: doctor?.userId?.email || 'Email Not Available',
+                        phone: doctor?.userId?.phone || 'Phone Not Available',
+                        department: {
+                            name: doctor?.department?.name || 'Department Not Available'
+                        },
+                        specialization: {
+                            name: doctor?.specialization?.name || 'Specialization Not Available'
+                        }
+                    }
+                };
+            });
         } else if (req.user.role === 'doctor') {
             const doctor = await Doctor.findOne({ userId: req.user._id });
             if (!doctor) {
@@ -103,21 +161,8 @@ router.get('/', auth, async (req, res) => {
             }
 
             appointments = await Appointment.find({ doctorId: doctor._id })
-                .populate({
-                    path: 'doctorId',
-                    populate: [
-                        { 
-                            path: 'userId', 
-                            select: 'name email profilePhoto' 
-                        },
-                        { 
-                            path: 'department',
-                            select: 'name'
-                        }
-                    ]
-                })
-                .populate('patientId', 'name email profilePhoto')
-                .sort({ date: -1 }); // Sort by date descending
+                .populate('patientId', 'name email phone')
+                .sort({ date: -1 });
         } else {
             return res.status(403).json({ message: 'Not authorized to view appointments' });
         }
@@ -130,7 +175,7 @@ router.get('/', auth, async (req, res) => {
 });
 
 // Get all appointments (admin only)
-router.get('/all', auth, authorize('admin'), async (req, res) => {
+router.get('/all', authenticateToken, isAdmin, async (req, res) => {
     try {
         const appointments = await Appointment.find()
             .populate({
@@ -151,7 +196,7 @@ router.get('/all', auth, authorize('admin'), async (req, res) => {
 });
 
 // Cancel appointment
-router.put('/:id/cancel', auth, async (req, res) => {
+router.put('/:id/cancel', authenticateToken, async (req, res) => {
     try {
         const { reason } = req.body;
         const appointment = await Appointment.findById(req.params.id);
@@ -181,34 +226,33 @@ router.put('/:id/cancel', auth, async (req, res) => {
 });
 
 // Complete appointment (doctor only)
-router.patch('/:id/complete', auth, authorize('doctor'), async (req, res) => {
+router.patch('/:id/complete', authenticateToken, async (req, res) => {
     try {
+        // Check if user is a doctor
+        if (req.user.role !== 'doctor') {
+            return res.status(403).json({ message: 'Only doctors can complete appointments' });
+        }
+
         // Get the doctor document using the user ID
         const doctor = await Doctor.findOne({ userId: req.user._id });
         if (!doctor) {
             return res.status(404).json({ message: 'Doctor profile not found' });
         }
 
-        const appointment = await Appointment.findOne({
-            _id: req.params.id,
-            doctorId: doctor._id,
-            status: 'confirmed' // Only confirmed appointments can be completed
-        });
-
+        const appointment = await Appointment.findById(req.params.id);
         if (!appointment) {
-            return res.status(404).json({ message: 'Appointment not found or not in confirmed status' });
+            return res.status(404).json({ message: 'Appointment not found' });
+        }
+
+        // Check if this appointment belongs to the doctor
+        if (appointment.doctorId.toString() !== doctor._id.toString()) {
+            return res.status(403).json({ message: 'Not authorized to complete this appointment' });
         }
 
         appointment.status = 'completed';
         await appointment.save();
 
-        // Populate the data before sending response
-        await appointment.populate([
-            { path: 'doctorId', populate: { path: 'userId', select: 'name email' } },
-            { path: 'patientId', select: 'name email' }
-        ]);
-
-        res.json({ message: 'Appointment completed successfully', appointment });
+        res.json({ message: 'Appointment marked as completed', appointment });
     } catch (error) {
         console.error('Error completing appointment:', error);
         res.status(500).json({ message: 'Server error', error: error.message });
@@ -216,7 +260,7 @@ router.patch('/:id/complete', auth, authorize('doctor'), async (req, res) => {
 });
 
 // Get appointment statistics (admin only)
-router.get('/stats/overview', auth, authorize('admin'), async (req, res) => {
+router.get('/stats/overview', authenticateToken, isAdmin, async (req, res) => {
     try {
         const stats = await Promise.all([
             Appointment.countDocuments({ status: 'pending' }),
@@ -243,9 +287,61 @@ router.get('/stats/overview', auth, authorize('admin'), async (req, res) => {
 });
 
 // Get single appointment
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', authenticateToken, async (req, res) => {
     try {
         const appointment = await Appointment.findById(req.params.id)
+            .populate({
+                path: 'doctorId',
+                populate: [
+                    { 
+                        path: 'userId',
+                        select: 'name email phone'
+                    },
+                    { 
+                        path: 'department',
+                        select: 'name'
+                    },
+                    {
+                        path: 'specialization',
+                        select: 'name'
+                    }
+                ]
+            })
+            .populate('patientId', 'name email phone');
+        
+        if (!appointment) {
+            return res.status(404).json({ message: 'Appointment not found' });
+        }
+
+        // Transform the data
+        const doctor = appointment.doctorId;
+        const transformedAppointment = {
+            ...appointment.toObject(),
+            doctorId: {
+                ...doctor,
+                name: doctor?.userId?.name || 'Doctor Not Available',
+                email: doctor?.userId?.email || 'Email Not Available',
+                phone: doctor?.userId?.phone || 'Phone Not Available',
+                department: {
+                    name: doctor?.department?.name || 'Department Not Available'
+                },
+                specialization: {
+                    name: doctor?.specialization?.name || 'Specialization Not Available'
+                }
+            }
+        };
+        
+        res.json(transformedAppointment);
+    } catch (err) {
+        console.error('Error fetching appointment:', err);
+        res.status(500).json({ message: 'Error fetching appointment' });
+    }
+});
+
+// Get appointments by patient ID (admin only)
+router.get('/patient/:patientId', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const appointments = await Appointment.find({ patientId: req.params.patientId })
             .populate({
                 path: 'doctorId',
                 populate: [
@@ -253,16 +349,13 @@ router.get('/:id', auth, async (req, res) => {
                     { path: 'department', select: 'name' }
                 ]
             })
-            .populate('patientId', 'name email');
-        
-        if (!appointment) {
-            return res.status(404).json({ message: 'Appointment not found' });
-        }
-        
-        res.json(appointment);
-    } catch (err) {
-        console.error('Error fetching appointment:', err);
-        res.status(500).json({ message: 'Error fetching appointment' });
+            .populate('patientId', 'name email phone')
+            .sort({ date: -1 });
+
+        res.json(appointments);
+    } catch (error) {
+        console.error('Error fetching patient appointments:', error);
+        res.status(500).json({ message: 'Server error', error: error.message });
     }
 });
 

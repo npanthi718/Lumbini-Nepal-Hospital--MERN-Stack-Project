@@ -78,27 +78,27 @@ const AboutUs = () => {
         image: '/images/management/CMO.jpg',
       },
       {
-        name: 'Ms. Sareeta Karki',
+        name: 'Dr. Sareeta Karki',
         position: 'Chief Nursing Officer',
         description: 'Leading the nursing team to provide quality patient care services.',
         image: '/images/management/CNO.jpg',
       },
 
       {
-        name: 'Mr. Bhagirath Singh',
+        name: 'Dr. Bhagirath Singh',
         position: 'Administrative Director',
         description: 'Overseeing non-medical operations and ensuring administrative processes align with the hospital’s goals.',
         image: '/images/management/AD.jpg',
       },
       
       {
-        name: 'Mr. Nawaraj Karki',
+        name: 'Dr. Nawaraj Karki',
         position: 'Hospital Administrator',
         description: 'Overseeing daily administrative tasks to ensure seamless operations.',
         image: '/images/management/HA.jpg',
       },
       {
-        name: 'Ms. Samjhana Panthi',
+        name: 'Dr. Samjhana Kharel',
         position: 'Director of Human Resources',
         description: 'Managing recruitment and staff relations to foster a healthy work environment.',
         image: '/images/management/DHR.jpg',
@@ -110,7 +110,7 @@ const AboutUs = () => {
         image: '/images/management/DPS.jpg',
       },
       {
-        name: 'Mr. Pralad Phuyal',
+        name: 'Dr. Pralad Phuyal',
         position: 'Director of Marketing and Public Relations',
         description: 'Promoting hospital services and managing its public image effectively.',
         image: '/images/management/DMPR.jpg',

@@ -4,19 +4,12 @@ const User = require('../models/user.model');
 const Doctor = require('../models/doctor.model');
 const Appointment = require('../models/appointment.model');
 const Department = require('../models/department.model');
-const { auth, authorize } = require('../middleware/auth');
+const Prescription = require('../models/prescription.model');
+const { authenticateToken, isAdmin } = require('../middleware/auth');
 
-// Middleware to check if user is admin
-const adminCheck = (req, res, next) => {
-  if (!req.user || req.user.role !== 'admin') {
-    return res.status(403).json({ message: 'Access denied: Admin privileges required' });
-  }
-  next();
-};
-
-// Apply admin check to all routes
-router.use(auth);
-router.use(adminCheck);
+// Apply authentication and admin middleware to all routes
+router.use(authenticateToken);
+router.use(isAdmin);
 
 // Get dashboard stats
 router.get('/stats', async (req, res) => {
@@ -44,119 +37,50 @@ router.get('/stats', async (req, res) => {
 // Get all appointments (admin only)
 router.get('/appointments', async (req, res) => {
   try {
-    console.log('Fetching appointments for admin...');
-    
-    // Fetch all appointments with populated data
+    console.log('Fetching all appointments...');
     const appointments = await Appointment.find()
       .populate({
-        path: 'patientId',
-        select: 'name email profilePhoto phoneNumber'
-      })
-      .populate({
         path: 'doctorId',
-        populate: {
-          path: 'department',
-          select: 'name'
-        }
+        populate: [
+          { path: 'userId', select: 'name email' },
+          { path: 'department', select: 'name' }
+        ]
       })
-      .sort({ date: -1 })
+      .populate('patientId', 'name email')
       .lean();
-
-    console.log(`Found ${appointments?.length || 0} appointments`);
-
-    if (!appointments || appointments.length === 0) {
-      console.log('No appointments found');
-      return res.json({
-        appointments: [],
-        categorizedAppointments: {
-          today: [],
-          upcoming: [],
-          past: []
-        },
-        stats: {
-          totalAppointments: 0,
-          pendingAppointments: 0,
-          todayAppointments: 0,
-          upcomingAppointments: 0,
-          pastAppointments: 0
-        }
-      });
-    }
-
-    // Get today's date at midnight
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    // Filter appointments by date with proper date handling
-    const todayAppointments = appointments.filter(apt => {
-      if (!apt.date) return false;
-      const aptDate = new Date(apt.date);
-      aptDate.setHours(0, 0, 0, 0);
-      return aptDate.getTime() === today.getTime();
-    });
-
-    const upcomingAppointments = appointments.filter(apt => {
-      if (!apt.date) return false;
-      const aptDate = new Date(apt.date);
-      aptDate.setHours(0, 0, 0, 0);
-      return aptDate > today && apt.status !== 'completed' && apt.status !== 'cancelled';
-    });
-
-    const pastAppointments = appointments.filter(apt => {
-      if (!apt.date) return false;
-      const aptDate = new Date(apt.date);
-      aptDate.setHours(0, 0, 0, 0);
-      return aptDate < today || apt.status === 'completed' || apt.status === 'cancelled';
-    });
-
-    // Calculate stats
-    const stats = {
-      totalAppointments: appointments.length,
-      pendingAppointments: appointments.filter(apt => apt.status === 'pending').length,
-      todayAppointments: todayAppointments.length,
-      upcomingAppointments: upcomingAppointments.length,
-      pastAppointments: pastAppointments.length,
-      completedAppointments: appointments.filter(apt => apt.status === 'completed').length
-    };
-
-    // Log the response for debugging
-    console.log('Sending appointments response:', {
-      totalAppointments: appointments.length,
-      todayAppointments: todayAppointments.length,
-      upcomingAppointments: upcomingAppointments.length,
-      pastAppointments: pastAppointments.length
-    });
     
-    res.json({
-      appointments,
-      categorizedAppointments: {
-        today: todayAppointments,
-        upcoming: upcomingAppointments,
-        past: pastAppointments
-      },
-      stats
-    });
+    console.log(`Found ${appointments.length} appointments`);
+    res.json(appointments);
   } catch (error) {
     console.error('Error fetching appointments:', error);
-    res.status(500).json({ 
-      message: 'Error fetching appointments',
-      error: error.message 
-    });
+    res.status(500).json({ message: 'Error fetching appointments', error: error.message });
   }
 });
 
 // Get all doctors
 router.get('/doctors', async (req, res) => {
   try {
+    console.log('Fetching all doctors...');
     const doctors = await Doctor.find()
       .populate({
         path: 'userId',
         select: 'name email profilePhoto phoneNumber'
       })
       .populate('department')
-      .lean();
+      .lean()
+      .then(doctors => doctors.map(doctor => ({
+        ...doctor,
+        name: doctor.userId?.name || 'Unknown Doctor',
+        email: doctor.userId?.email || 'No email',
+        department: {
+          name: doctor.department?.name || 'Unknown Department'
+        }
+      })));
+    
+    console.log(`Found ${doctors.length} doctors`);
     res.json(doctors);
   } catch (error) {
+    console.error('Error fetching doctors:', error);
     res.status(500).json({ message: 'Error fetching doctors', error: error.message });
   }
 });
@@ -164,9 +88,12 @@ router.get('/doctors', async (req, res) => {
 // Get all patients
 router.get('/patients', async (req, res) => {
   try {
-    const patients = await User.find({ role: 'patient' }).select('-password');
+    console.log('Fetching all patients...');
+    const patients = await User.find({ role: 'patient' }).lean();
+    console.log(`Found ${patients.length} patients`);
     res.json(patients);
   } catch (error) {
+    console.error('Error fetching patients:', error);
     res.status(500).json({ message: 'Error fetching patients', error: error.message });
   }
 });
@@ -174,9 +101,12 @@ router.get('/patients', async (req, res) => {
 // Get all departments
 router.get('/departments', async (req, res) => {
   try {
-    const departments = await Department.find();
+    console.log('Fetching all departments...');
+    const departments = await Department.find().lean();
+    console.log(`Found ${departments.length} departments`);
     res.json(departments);
   } catch (error) {
+    console.error('Error fetching departments:', error);
     res.status(500).json({ message: 'Error fetching departments', error: error.message });
   }
 });
@@ -241,6 +171,131 @@ router.patch('/appointments/:id/status', async (req, res) => {
       message: 'Error updating appointment status',
       error: error.message
     });
+  }
+});
+
+// Get patient appointments
+router.get('/patients/:id/appointments', async (req, res) => {
+  try {
+    console.log('Fetching patient appointments...');
+    const appointments = await Appointment.find({ patientId: req.params.id })
+      .populate({
+        path: 'doctorId',
+        populate: [
+          { path: 'userId', select: 'name email' },
+          { path: 'department', select: 'name' }
+        ]
+      })
+      .populate('patientId', 'name email')
+      .lean();
+    
+    console.log(`Found ${appointments.length} appointments for patient ${req.params.id}`);
+    res.json(appointments);
+  } catch (error) {
+    console.error('Error fetching patient appointments:', error);
+    res.status(500).json({ message: 'Error fetching patient appointments', error: error.message });
+  }
+});
+
+// Get patient prescriptions
+router.get('/patients/:id/prescriptions', async (req, res) => {
+  try {
+    console.log('Fetching patient prescriptions...');
+    const prescriptions = await Prescription.find({ patientId: req.params.id })
+      .populate({
+        path: 'doctorId',
+        populate: [
+          { path: 'userId', select: 'name email' },
+          { path: 'department', select: 'name' }
+        ]
+      })
+      .populate('patientId', 'name email')
+      .lean();
+    
+    console.log(`Found ${prescriptions.length} prescriptions for patient ${req.params.id}`);
+    res.json(prescriptions);
+  } catch (error) {
+    console.error('Error fetching patient prescriptions:', error);
+    res.status(500).json({ message: 'Error fetching patient prescriptions', error: error.message });
+  }
+});
+
+// Get doctor appointments
+router.get('/doctors/:id/appointments', async (req, res) => {
+  try {
+    const appointments = await Appointment.find({ doctorId: req.params.id })
+      .populate({
+        path: 'doctorId',
+        populate: [
+          {
+            path: 'userId',
+            select: 'name email'
+          },
+          {
+            path: 'department',
+            select: 'name'
+          }
+        ]
+      })
+      .populate('patientId', 'name email phone')
+      .sort({ date: -1 })
+      .lean();
+
+    // Transform the data to ensure consistent structure
+    const transformedAppointments = appointments.map(appointment => ({
+      ...appointment,
+      doctorId: {
+        ...appointment.doctorId,
+        name: appointment.doctorId?.userId?.name || 'Unknown Doctor',
+        email: appointment.doctorId?.userId?.email || 'No email',
+        department: {
+          name: appointment.doctorId?.department?.name || 'Unknown Department'
+        }
+      },
+      patientId: {
+        name: appointment.patientId?.name || 'Unknown Patient',
+        email: appointment.patientId?.email || 'No email',
+        phone: appointment.patientId?.phone || 'No phone'
+      }
+    }));
+
+    res.json(transformedAppointments);
+  } catch (error) {
+    console.error('Error fetching doctor appointments:', error);
+    res.status(500).json({ message: 'Error fetching doctor appointments', error: error.message });
+  }
+});
+
+// Get doctor prescriptions
+router.get('/doctors/:id/prescriptions', async (req, res) => {
+  try {
+    const prescriptions = await Prescription.find({ doctorId: req.params.id })
+      .populate({
+        path: 'doctorId',
+        populate: [
+          {
+            path: 'userId',
+            select: 'name email'
+          },
+          {
+            path: 'department',
+            select: 'name'
+          }
+        ]
+      })
+      .populate({
+        path: 'patientId',
+        populate: {
+          path: 'userId',
+          select: 'name email'
+        }
+      })
+      .sort({ createdAt: -1 });
+
+    res.json(prescriptions);
+  } catch (error) {
+    console.error('Error fetching doctor prescriptions:', error);
+    res.status(500).json({ message: 'Error fetching doctor prescriptions' });
   }
 });
 
