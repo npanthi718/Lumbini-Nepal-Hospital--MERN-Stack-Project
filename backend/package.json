@@ -4,8 +4,14 @@
   "description": "Backend for Hospital Management System",
   "main": "server.js",
   "scripts": {
+<<<<<<< HEAD:backend/package.json
     "start": "node app.js",
     "dev": "nodemon app.js"
+=======
+    "dev": "nodemon backend/server.js",
+    "build": "npm install && npm install --prefix frontend && npm run build --prefix frontend && npm run start --prefix frontend",
+    "start": "nodemon backend/server.js"
+>>>>>>> 2ff22c9 (Making Ready for Deployment):package.json
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

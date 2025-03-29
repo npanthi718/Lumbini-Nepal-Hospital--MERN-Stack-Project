@@ -3,25 +3,27 @@ import { useSnackbar } from 'notistack';
 
 // Create axios instance with default config
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api', // Ensure the base URL is correct
   headers: {
     'Content-Type': 'application/json',
   },
+<<<<<<< HEAD
   withCredentials: true // Enable sending cookies with requests
+=======
+  withCredentials: true, // Include credentials if needed
+>>>>>>> 2ff22c9 (Making Ready for Deployment)
 });
 
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('token'); // Ensure the token is stored in localStorage
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      config.headers.Authorization = `Bearer ${token}`; // Add the token to the Authorization header
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
 // Response interceptor
@@ -66,6 +68,7 @@ api.interceptors.response.use(
   }
 );
 
+<<<<<<< HEAD
 // API methods
 const apiService = {
   // Auth
@@ -97,3 +100,11 @@ const apiService = {
 };
 
 export default apiService; 
+=======
+// Export the API service
+const apiService = {
+  getPrescriptions: () => api.get('/prescriptions'), // Ensure this matches your backend route
+};
+
+export default apiService;
+>>>>>>> 2ff22c9 (Making Ready for Deployment)

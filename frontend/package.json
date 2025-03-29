@@ -1,8 +1,6 @@
 {
-  "name": "lumbini-nepal-hospital-frontend",
-  "version": "1.0.0",
-  "private": true,
   "dependencies": {
+<<<<<<< HEAD
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
     "@mui/icons-material": "^5.11.16",
@@ -45,4 +43,8 @@
     ]
   },
   "proxy": "http://localhost:5000"
+=======
+    "hospital-management-system-backend": "file:.."
+  }
+>>>>>>> 2ff22c9 (Making Ready for Deployment)
 }

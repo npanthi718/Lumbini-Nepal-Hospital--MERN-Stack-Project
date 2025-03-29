@@ -173,6 +173,12 @@ const Prescriptions = () => {
   const fetchPrescriptions = async () => {
     try {
       setLoading(true);
+<<<<<<< HEAD
+=======
+      setError(null); // Clear any previous errors
+
+      // Call the correct method from apiService
+>>>>>>> 2ff22c9 (Making Ready for Deployment)
       const response = await apiService.getPrescriptions();
       setPrescriptions(response.data);
     } catch (error) {
@@ -277,4 +283,4 @@ const Prescriptions = () => {
   );
 };
 
-export default Prescriptions; 
+export default Prescriptions;
